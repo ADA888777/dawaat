@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dawat",
+  "compatibility_date": "2026-09-01",
+
+  "assets": {
+    // مجلد مخرجات البناء كما يضبطه vite.config.ts
+    "directory": "./dist/public",
+
+    // حرج لهذا المشروع: التطبيق SPA بمسارات مثل /invite/:slug و /dashboard.
+    // بدون هذا السطر يفتح المدعو رابط دعوته فيحصل على 404، لأن Cloudflare
+    // يبحث عن ملف بذلك المسار ولا يجده.
+    "not_found_handling": "single-page-application"
+  }
+}
