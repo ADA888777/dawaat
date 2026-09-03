@@ -1,0 +1,12 @@
+# رؤوس الأمان لكل الاستجابات.
+# كانت مضبوطة في .replit، وهذا الملف بديلها على Cloudflare.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Permissions-Policy: geolocation=(), camera=(), microphone=(self), payment=()
+
+# ملفات البناء تحمل بصمة في اسمها، فتُخزَّن مؤقتاً لمدة طويلة بأمان
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

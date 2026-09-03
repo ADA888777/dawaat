@@ -1,0 +1,3 @@
+- [Orval zod codegen: avoid `format: uri`](orval-zod-uri-format.md) — `format: uri` on an OpenAPI string emits zod-v4-only syntax; this workspace pins zod v3.
+- [Supabase DB connectivity](supabase-connectivity.md) — direct DB host is IPv6-only from Replit; only the Session pooler URL works, and the password needs percent-encoding.
+- [Async subagent calls](subagent-async-calls.md) — always call `subagent(...)` unawaited and capture `jobId`, then `waitForJob` later; a bare `await subagent(...)` can hit the tool-call timeout even though the job keeps running.

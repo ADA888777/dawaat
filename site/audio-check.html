@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>فحص الصوت — دعوات</title>
+<!--
+  افتح هذه الصفحة من جهازك الحقيقي (iPhone أو Android) على HTTPS.
+
+  المحاكاة في المتصفح لا تُثبت أن التسجيل يعمل على iPhone: سلوك
+  MediaRecorder في Safari يختلف عن Chromium في الصيغة المنتَجة وفي
+  قيود التشغيل. هذه الصفحة تنفّذ الدورة كاملة على الجهاز نفسه:
+  تسجيل → رفع إلى Supabase Storage → تشغيل من الرابط.
+
+  الاستخدام: ضعها في مجلد public ثم افتح https://نطاقك/audio-check.html
+  واملأ الحقلين من Settings → API (المفتاح العام anon فقط).
+-->
+<style>
+  :root { --gold:#9B7445; --gold-light:#B99668; --dark:#29251F;
+          --cream:#FAF7F1; --line:#EEE4D6; --muted:#6B655C; }
+  * { box-sizing:border-box; }
+  body { font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--cream); color:var(--dark); margin:0; padding:16px;
+         line-height:1.7; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px;
+          padding:16px; margin-bottom:14px; max-width:640px; margin-inline:auto; }
+  h1 { font-size:1.3rem; margin:0 0 4px; color:var(--gold); }
+  h2 { font-size:1rem; margin:0 0 10px; }
+  .sub { color:var(--muted); font-size:.9rem; margin:0 0 14px; }
+  input { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px;
+          margin-bottom:8px; font-size:16px; direction:ltr; text-align:left; }
+  button { background:var(--dark); color:var(--gold-light); border:0;
+           padding:14px 18px; border-radius:10px; font-size:1rem; font-weight:600;
+           min-height:48px; cursor:pointer; }
+  button:disabled { opacity:.45; }
+  button.rec { background:#B3261E; color:#fff; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .line { display:flex; gap:8px; padding:7px 0; border-bottom:1px solid var(--line);
+          font-size:.92rem; align-items:flex-start; }
+  .line:last-child { border-bottom:0; }
+  .k { color:var(--muted); min-width:130px; }
+  .v { font-weight:600; word-break:break-all; }
+  .ok { color:#1B5E20; } .bad { color:#B3261E; } .warn { color:#8A6D1F; }
+  audio { width:100%; margin-top:10px; }
+  pre { background:var(--dark); color:#D5CCBE; padding:12px; border-radius:8px;
+        overflow:auto; font-size:.78rem; direction:ltr; text-align:left; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>فحص الصوت على الجهاز الحقيقي</h1>
+  <p class="sub">شغّل هذه الصفحة على iPhone وعلى Android. لا تعتمد على نتيجة الكمبيوتر وحده.</p>
+  <div id="env"></div>
+</div>
+
+<div class="card">
+  <h2>1. إعداد الاتصال</h2>
+  <input id="url" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocorrect="off">
+  <input id="key" placeholder="anon public key (وليس service_role)" autocapitalize="off" autocorrect="off">
+  <div class="row">
+    <button id="login">تسجيل الدخول للرفع</button>
+    <span id="loginState" class="sub" style="margin:0"></span>
+  </div>
+  <input id="email" placeholder="بريد حساب اختباري" type="email" style="margin-top:8px">
+  <input id="pw" placeholder="كلمة المرور" type="password">
+</div>
+
+<div class="card">
+  <h2>2. التسجيل</h2>
+  <div class="row">
+    <button id="rec" disabled>ابدأ التسجيل</button>
+    <span id="recState" class="sub" style="margin:0"></span>
+  </div>
+  <div id="recInfo"></div>
+  <audio id="local" controls playsinline preload="metadata" style="display:none"></audio>
+</div>
+
+<div class="card">
+  <h2>3. الرفع والتشغيل من الرابط</h2>
+  <div class="row"><button id="up" disabled>ارفع إلى Supabase</button></div>
+  <div id="upInfo"></div>
+  <audio id="remote" controls playsinline preload="metadata" style="display:none"></audio>
+</div>
+
+<div class="card">
+  <h2>النتيجة</h2>
+  <p class="sub">أرسل هذا النص كما هو.</p>
+  <pre id="out">—</pre>
+</div>
+
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const $ = (id) => document.getElementById(id);
+const log = [];
+function line(host, k, v, cls) {
+  const d = document.createElement("div");
+  d.className = "line";
+  d.innerHTML = `<span class="k">${k}</span><span class="v ${cls||''}">${v}</span>`;
+  host.appendChild(d);
+  log.push(`${k}: ${v}`);
+  $("out").textContent = log.join("\n");
+}
+
+// ─── بيئة الجهاز ───
+const ua = navigator.userAgent;
+const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
+const env = $("env");
+line(env, "الجهاز", isIOS ? "iOS" : /Android/.test(ua) ? "Android" : "سطح مكتب");
+line(env, "المتصفح", isSafari ? "Safari" : /CriOS|Chrome/.test(ua) ? "Chrome" : "آخر");
+line(env, "سياق آمن (HTTPS)", window.isSecureContext ? "نعم" : "لا — التسجيل لن يعمل",
+     window.isSecureContext ? "ok" : "bad");
+const hasMR = typeof MediaRecorder !== "undefined";
+line(env, "MediaRecorder", hasMR ? "مدعوم" : "غير مدعوم (Safari قبل iOS 14.3)",
+     hasMR ? "ok" : "bad");
+line(env, "getUserMedia", navigator.mediaDevices?.getUserMedia ? "مدعوم" : "غير مدعوم",
+     navigator.mediaDevices?.getUserMedia ? "ok" : "bad");
+
+const CANDIDATES = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm",
+                    "audio/ogg;codecs=opus", "audio/ogg"];
+let supported = [];
+if (hasMR) {
+  supported = CANDIDATES.filter(t => MediaRecorder.isTypeSupported(t));
+  line(env, "الصيغ المدعومة", supported.join("، ") || "لا شيء",
+       supported.length ? "ok" : "bad");
+}
+if (hasMR && navigator.mediaDevices?.getUserMedia && window.isSecureContext) {
+  $("rec").disabled = false;
+} else {
+  line(env, "الخلاصة", "التسجيل غير متاح هنا — يجب أن يظهر في التطبيق زر رفع ملف بديل", "warn");
+}
+
+// ─── الاتصال ───
+let sb = null, user = null;
+$("login").onclick = async () => {
+  try {
+    sb = createClient($("url").value.trim(), $("key").value.trim(),
+                      { auth: { persistSession: false } });
+    const { data, error } = await sb.auth.signInWithPassword({
+      email: $("email").value.trim(), password: $("pw").value });
+    if (error) throw error;
+    user = data.user;
+    $("loginState").textContent = "✅ تم";
+    line(env, "تسجيل الدخول", "نجح — " + user.id.slice(0, 8), "ok");
+  } catch (e) {
+    $("loginState").textContent = "❌ " + e.message;
+    line(env, "تسجيل الدخول", "فشل — " + e.message, "bad");
+  }
+};
+
+// ─── التسجيل ───
+let recorder = null, chunks = [], blob = null, mime = "";
+$("rec").onclick = async () => {
+  if (recorder && recorder.state === "recording") {
+    recorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mime = supported[0] || "";
+    recorder = mime ? new MediaRecorder(stream, { mimeType: mime })
+                    : new MediaRecorder(stream);
+    chunks = [];
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = () => {
+      // الصيغة الفعلية التي أنتجها الجهاز، لا التي طلبناها
+      const actual = (recorder.mimeType || mime || "audio/mp4").split(";")[0].trim();
+      blob = new Blob(chunks, { type: actual });
+      stream.getTracks().forEach(t => t.stop());
+      $("rec").textContent = "ابدأ التسجيل";
+      $("rec").classList.remove("rec");
+      $("recState").textContent = "";
+      const info = $("recInfo");
+      line(info, "الصيغة المنتَجة", actual, "ok");
+      line(info, "الحجم", (blob.size / 1024).toFixed(1) + " كيلوبايت",
+           blob.size > 0 ? "ok" : "bad");
+      const el = $("local");
+      el.src = URL.createObjectURL(blob);
+      el.style.display = "block";
+      el.onloadedmetadata = () => line(info, "التشغيل محلياً", "يعمل", "ok");
+      el.onerror = () => line(info, "التشغيل محلياً", "فشل", "bad");
+      $("up").disabled = !user;
+      if (!user) line(info, "الرفع", "سجّل الدخول أولاً لتفعيل الرفع", "warn");
+    };
+    recorder.start();
+    $("rec").textContent = "إيقاف التسجيل";
+    $("rec").classList.add("rec");
+    $("recState").textContent = "جارٍ التسجيل… تكلّم ثم أوقف";
+  } catch (e) {
+    line($("recInfo"), "الوصول للميكروفون", "فشل — " + e.message, "bad");
+  }
+};
+
+// ─── الرفع والتشغيل من الرابط ───
+$("up").onclick = async () => {
+  const info = $("upInfo");
+  try {
+    const ext = blob.type.includes("mp4") ? "m4a"
+              : blob.type.includes("ogg") ? "ogg" : "webm";
+    const path = `${user.id}/audio-check-${Date.now()}.${ext}`;
+    line(info, "المسار", path);
+    const { error } = await sb.storage.from("event-audios")
+      .upload(path, blob, { contentType: blob.type, upsert: false });
+    if (error) throw error;
+    line(info, "الرفع إلى Storage", "نجح", "ok");
+
+    const { data } = sb.storage.from("event-audios").getPublicUrl(path);
+    line(info, "الرابط العام", data.publicUrl);
+
+    const head = await fetch(data.publicUrl);
+    line(info, "الوصول للرابط", `HTTP ${head.status}`, head.ok ? "ok" : "bad");
+    line(info, "نوع المحتوى المُعاد", head.headers.get("content-type") || "—");
+
+    const el = $("remote");
+    el.src = data.publicUrl;
+    el.style.display = "block";
+    el.onloadedmetadata = () =>
+      line(info, "التشغيل من الرابط", "يعمل — افتح هذا الرابط من جهاز آخر للتأكد", "ok");
+    el.onerror = () =>
+      line(info, "التشغيل من الرابط", "فشل — راجع أنواع MIME المسموحة في الـ bucket", "bad");
+  } catch (e) {
+    line(info, "الرفع", "فشل — " + e.message, "bad");
+    if (/mime/i.test(e.message))
+      line(info, "الأرجح", `أضف ${blob.type} إلى allowed_mime_types في bucket event-audios`, "warn");
+  }
+};
+</script>
+</body>
+</html>
