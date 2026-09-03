@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- [م-6] حُذف maximum-scale=1: كان يمنع التكبير بالإصبعين
+         وهو مخالف لمعيار WCAG 1.4.4 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>دعوات — دعوات إلكترونية أنيقة لمناسباتك</title>
+
+    <!-- [م-5] وصف حقيقي بدل النص الافتراضي "Update this description".
+         هذه الوسوم هي ما يعرضه واتساب في بطاقة معاينة الرابط. -->
+    <meta name="description" content="أنشئ دعوة إلكترونية أنيقة لمناسبتك، أرسلها لمدعويك عبر واتساب، وتابع ردودهم لحظة بلحظة." />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#121212" />
+    <!-- [ح-2] لا تُسرَّب مسارات الدعوة إلى أي نطاق خارجي -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <meta property="og:site_name" content="دعوات" />
+    <meta property="og:locale" content="ar_SA" />
+    <meta property="og:title" content="دعوات — دعوات إلكترونية أنيقة لمناسباتك" />
+    <meta property="og:description" content="أنشئ دعوة إلكترونية أنيقة لمناسبتك، أرسلها لمدعويك عبر واتساب، وتابع ردودهم لحظة بلحظة." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="دعوات — دعوات إلكترونية أنيقة لمناسباتك" />
+    <meta name="twitter:description" content="أنشئ دعوة إلكترونية أنيقة لمناسبتك، أرسلها لمدعويك عبر واتساب، وتابع ردودهم لحظة بلحظة." />
+    <meta name="twitter:image" content="/og-image.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- [أداء] كان يُحمّل Inter بينما التطبيق يستخدم Cairo المستورد في index.css.
+         خط كامل كان يُنزَّل بلا استخدام. -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap"
+      onload="this.onload=null;this.rel='stylesheet'"
+    >
+    <script type="module" crossorigin src="/assets/index-CzWiWC7h.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DDfsC3fs.css">
+  </head>
+  <body>
+    <!-- الإعداد يُقرأ قبل تحميل التطبيق — عدّل public/config.js فقط -->
+    <script src="/config.js"></script>
+    <div id="root"></div>
+  </body>
+</html>
