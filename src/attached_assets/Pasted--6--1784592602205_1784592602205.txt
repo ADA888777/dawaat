@@ -1,0 +1,87 @@
+// =====================================================================
+// خدمة التخزين (البند 6 + البند 11)
+// ترفع الملفات إلى Buckets الـ Supabase بدل أي تخزين محلي أو base64.
+//
+// مهم: سياسات التخزين تشترط أن يكون المسار: {user_id}/اسم-الملف
+// وهذه الخدمة تبني المسار بهذا الشكل تلقائياً — لا ترفع بمسار آخر.
+// =====================================================================
+import { supabase } from '../lib/supabaseClient';
+
+export const BUCKETS = {
+  EVENT_IMAGES: 'event-images',     // عام — صور الأغلفة
+  EVENT_AUDIOS: 'event-audios',     // عام — الصوتيات
+  EVENT_FILES: 'event-files',       // خاص — ملفات المالك فقط
+  TEMPLATE_IMAGES: 'template-images', // عام — رفعه للأدمن فقط
+};
+
+async function requireUserId() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user) throw new Error('يجب تسجيل الدخول أولاً');
+  return data.user.id;
+}
+
+function buildPath(userId, file) {
+  const ext = (file.name?.split('.').pop() || 'bin').toLowerCase();
+  const unique =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${userId}/${unique}.${ext}`;
+}
+
+/**
+ * رفع ملف إلى Bucket معيّن.
+ * يرجع { path, url } — خزّن الرابط في الجدول المناسب
+ * (مثلاً events.cover_image أو events.audio_url).
+ */
+export async function uploadFile(bucket, file) {
+  if (!file) throw new Error('لم يتم اختيار ملف');
+  const userId = await requireUserId();
+  const path = buildPath(userId, file);
+
+  const { error } = await supabase.storage
+    .from(bucket)
+    .upload(path, file, { cacheControl: '3600', upsert: false });
+  if (error) throw error;
+
+  // الـ buckets العامة لها رابط مباشر؛ الخاصة تحتاج رابطاً موقّعاً
+  if (bucket === BUCKETS.EVENT_FILES) {
+    const url = await getSignedUrl(bucket, path);
+    return { path, url };
+  }
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  return { path, url: data.publicUrl };
+}
+
+/** اختصارات جاهزة */
+export const uploadEventImage = (file) => uploadFile(BUCKETS.EVENT_IMAGES, file);
+export const uploadEventAudio = (file) => uploadFile(BUCKETS.EVENT_AUDIOS, file);
+export const uploadEventFile  = (file) => uploadFile(BUCKETS.EVENT_FILES, file);
+export const uploadTemplateImage = (file) => uploadFile(BUCKETS.TEMPLATE_IMAGES, file); // أدمن فقط
+
+/** رابط مؤقت موقّع لملف في bucket خاص (افتراضياً ساعة واحدة) */
+export async function getSignedUrl(bucket, path, expiresInSeconds = 3600) {
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(path, expiresInSeconds);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+/** حذف ملف */
+export async function deleteFile(bucket, path) {
+  const { error } = await supabase.storage.from(bucket).remove([path]);
+  if (error) throw error;
+  return true;
+}
+
+/** قائمة ملفات المستخدم الحالي داخل bucket */
+export async function listMyFiles(bucket) {
+  const userId = await requireUserId();
+  const { data, error } = await supabase.storage.from(bucket).list(userId, {
+    limit: 100,
+    sortBy: { column: 'created_at', order: 'desc' },
+  });
+  if (error) throw error;
+  return data;
+}

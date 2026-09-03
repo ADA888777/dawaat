@@ -1,0 +1,97 @@
+// =====================================================================
+// خدمة المصادقة (البند 7)
+// Email + Password ، Forget Password ، Email Verification
+//
+// ملاحظة: تمرير full_name و phone في metadata عند التسجيل
+// يجعل التريجر handle_new_user يعبّئها تلقائياً في جدول profiles.
+// =====================================================================
+import { supabase } from '../lib/supabaseClient';
+
+/** تسجيل مستخدم جديد (يُرسل بريد تأكيد إذا كان Confirm email مفعّلاً) */
+export async function signUp({ email, password, fullName, phone }) {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { full_name: fullName, phone },
+      emailRedirectTo: `${window.location.origin}/auth/callback`,
+    },
+  });
+  if (error) throw error;
+  return data;
+}
+
+/** تسجيل الدخول */
+export async function signIn({ email, password }) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+/** تسجيل الخروج */
+export async function signOut() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+  return true;
+}
+
+/** نسيت كلمة المرور — يرسل رابط استعادة إلى البريد */
+export async function resetPassword(email) {
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/reset-password`,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/** تعيين كلمة مرور جديدة (تُستدعى في صفحة /reset-password بعد فتح الرابط) */
+export async function updatePassword(newPassword) {
+  const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+  return data;
+}
+
+/** المستخدم الحالي (null إذا لم يسجّل دخول) */
+export async function getCurrentUser() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) return null;
+  return data.user;
+}
+
+/** الملف الشخصي الكامل من جدول profiles */
+export async function getMyProfile() {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** تحديث الاسم أو الجوال (الأعمدة الأخرى محمية من قاعدة البيانات) */
+export async function updateMyProfile({ fullName, phone }) {
+  const user = await getCurrentUser();
+  if (!user) throw new Error('يجب تسجيل الدخول أولاً');
+  const updates = {};
+  if (fullName !== undefined) updates.full_name = fullName;
+  if (phone !== undefined) updates.phone = phone;
+  const { data, error } = await supabase
+    .from('profiles')
+    .update(updates)
+    .eq('id', user.id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** الاستماع لتغيّر حالة الجلسة (دخول / خروج / تحديث توكن) */
+export function onAuthChange(callback) {
+  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+    callback(session?.user ?? null, session);
+  });
+  return () => data.subscription.unsubscribe();
+}

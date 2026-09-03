@@ -1,0 +1,133 @@
+// =====================================================================
+// خدمة المناسبات + القوالب + الاشتراكات (البنود 2 ، 4 ، 5 ، 11)
+// كل الاستعلامات محمية بـ RLS: المستخدم يرى بياناته فقط.
+// =====================================================================
+import { supabase } from '../lib/supabaseClient';
+
+async function requireUserId() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user) throw new Error('يجب تسجيل الدخول أولاً');
+  return data.user.id;
+}
+
+// ---------------------------------------------------------------------
+// المناسبات
+// ---------------------------------------------------------------------
+
+/** إنشاء مناسبة جديدة */
+export async function createEvent({
+  title,
+  description = null,
+  eventDate = null,   // 'YYYY-MM-DD'
+  eventTime = null,   // 'HH:MM'
+  location = null,
+  templateId = null,
+  audioUrl = null,
+  coverImage = null,
+}) {
+  if (!title?.trim()) throw new Error('عنوان المناسبة مطلوب');
+  const userId = await requireUserId();
+
+  const { data, error } = await supabase
+    .from('events')
+    .insert({
+      user_id: userId,
+      title: title.trim(),
+      description,
+      event_date: eventDate,
+      event_time: eventTime,
+      location,
+      template_id: templateId,
+      audio_url: audioUrl,
+      cover_image: coverImage,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** كل مناسبات المستخدم الحالي (مع بيانات القالب المرتبط) */
+export async function getMyEvents() {
+  const { data, error } = await supabase
+    .from('events')
+    .select('*, template:templates (id, name, preview_image)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+/** مناسبة واحدة بالتفصيل */
+export async function getEventById(eventId) {
+  const { data, error } = await supabase
+    .from('events')
+    .select('*, template:templates (id, name, preview_image, template_image)')
+    .eq('id', eventId)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** تحديث مناسبة (تحديث جزئي) */
+export async function updateEvent(eventId, updates) {
+  const mapped = {};
+  if (updates.title !== undefined) mapped.title = updates.title.trim();
+  if (updates.description !== undefined) mapped.description = updates.description;
+  if (updates.eventDate !== undefined) mapped.event_date = updates.eventDate;
+  if (updates.eventTime !== undefined) mapped.event_time = updates.eventTime;
+  if (updates.location !== undefined) mapped.location = updates.location;
+  if (updates.templateId !== undefined) mapped.template_id = updates.templateId;
+  if (updates.audioUrl !== undefined) mapped.audio_url = updates.audioUrl;
+  if (updates.coverImage !== undefined) mapped.cover_image = updates.coverImage;
+  if (Object.keys(mapped).length === 0) throw new Error('لا توجد حقول لتحديثها');
+
+  const { data, error } = await supabase
+    .from('events')
+    .update(mapped)
+    .eq('id', eventId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** حذف مناسبة (المدعوون يُحذفون تلقائياً بسبب on delete cascade) */
+export async function deleteEvent(eventId) {
+  const { error } = await supabase.from('events').delete().eq('id', eventId);
+  if (error) throw error;
+  return true;
+}
+
+// ---------------------------------------------------------------------
+// القوالب
+// ---------------------------------------------------------------------
+
+/** القوالب الفعّالة المتاحة للاختيار */
+export async function getActiveTemplates() {
+  const { data, error } = await supabase
+    .from('templates')
+    .select('*')
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+// ---------------------------------------------------------------------
+// الاشتراكات
+// ---------------------------------------------------------------------
+
+/** الاشتراك الفعّال الحالي للمستخدم (null إذا لا يوجد) */
+export async function getMySubscription() {
+  const userId = await requireUserId();
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('start_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}

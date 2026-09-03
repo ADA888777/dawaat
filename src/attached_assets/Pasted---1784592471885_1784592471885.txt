@@ -1,0 +1,150 @@
+// =====================================================================
+// زر "استيراد من جهات الاتصال" (البند 9)
+//
+// - يستخدم Contact Picker API إذا كان الجهاز والمتصفح يدعمانه
+//   (حالياً: Chrome / Edge / Samsung Internet على أندرويد، عبر HTTPS فقط)
+// - إذا غير مدعوم (iOS أو سطح المكتب) → يظهر الإدخال اليدوي تلقائياً
+// - عند اختيار جهة اتصال: يعبّئ الاسم والجوال ويحفظ مباشرة في جدول guests
+//
+// الاستخدام:
+//   <ContactImportButton eventId={event.id} onImported={(guests) => refresh()} />
+// =====================================================================
+import { useState } from 'react';
+import { addGuest, importContacts } from '../services/guestsService';
+
+const isContactPickerSupported = () =>
+  typeof navigator !== 'undefined' &&
+  'contacts' in navigator &&
+  'ContactsManager' in window;
+
+export default function ContactImportButton({ eventId, onImported }) {
+  const [manualOpen, setManualOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState(null); // { type: 'ok' | 'err', text }
+
+  // ---- المسار الأول: منتقي جهات الاتصال ----
+  async function handleImportClick() {
+    setMessage(null);
+
+    if (!isContactPickerSupported()) {
+      // المتصفح لا يدعم المنتقي → الإدخال اليدوي
+      setManualOpen(true);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      // اختيار متعدد: الاسم + رقم الجوال
+      const picked = await navigator.contacts.select(['name', 'tel'], {
+        multiple: true,
+      });
+
+      if (!picked || picked.length === 0) return; // المستخدم أغلق المنتقي
+
+      // تعبئة الاسم والجوال تلقائياً من جهة الاتصال
+      const contacts = picked.map((c) => ({
+        name: c.name?.[0] || '',
+        phone: c.tel?.[0] || '',
+      }));
+
+      // الحفظ مباشرة في جدول guests
+      const saved = await importContacts(eventId, contacts);
+      setMessage({
+        type: 'ok',
+        text:
+          saved.length > 0
+            ? `تمت إضافة ${saved.length} من المدعوين بنجاح`
+            : 'جهات الاتصال المختارة مضافة مسبقاً',
+      });
+      if (saved.length > 0) onImported?.(saved);
+    } catch (err) {
+      console.error('Contact Picker error:', err);
+      // فشل المنتقي (رفض إذن، خطأ متصفح...) → التحويل للإدخال اليدوي
+      setManualOpen(true);
+      setMessage({ type: 'err', text: 'تعذّر فتح جهات الاتصال — أدخل البيانات يدوياً' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ---- المسار البديل: الإدخال اليدوي ----
+  async function handleManualSave() {
+    setMessage(null);
+    if (!name.trim()) {
+      setMessage({ type: 'err', text: 'اسم المدعو مطلوب' });
+      return;
+    }
+    try {
+      setLoading(true);
+      const guest = await addGuest({ eventId, name, phone });
+      setMessage({ type: 'ok', text: 'تمت إضافة المدعو بنجاح' });
+      setName('');
+      setPhone('');
+      onImported?.([guest]);
+    } catch (err) {
+      console.error(err);
+      setMessage({ type: 'err', text: 'حدث خطأ أثناء الحفظ — حاول مرة أخرى' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // التنسيقات هنا مبسّطة عمداً — عدّلها لتطابق تصميم تطبيقك
+  return (
+    <div dir="rtl" style={{ display: 'grid', gap: 10, maxWidth: 420 }}>
+      <button
+        type="button"
+        onClick={handleImportClick}
+        disabled={loading}
+        style={{ padding: '10px 16px', cursor: 'pointer', fontWeight: 600 }}
+      >
+        {loading ? '... جارٍ التنفيذ' : '📇 استيراد من جهات الاتصال'}
+      </button>
+
+      {!isContactPickerSupported() && !manualOpen && (
+        <small style={{ opacity: 0.75 }}>
+          متصفحك لا يدعم منتقي جهات الاتصال — اضغط الزر للإدخال اليدوي.
+        </small>
+      )}
+
+      {manualOpen && (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <input
+            type="text"
+            placeholder="اسم المدعو"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={{ padding: 8 }}
+          />
+          <input
+            type="tel"
+            dir="ltr"
+            placeholder="05xxxxxxxx"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            style={{ padding: 8, textAlign: 'right' }}
+          />
+          <button
+            type="button"
+            onClick={handleManualSave}
+            disabled={loading}
+            style={{ padding: '8px 16px', cursor: 'pointer' }}
+          >
+            حفظ المدعو
+          </button>
+        </div>
+      )}
+
+      {message && (
+        <p
+          role="status"
+          style={{ margin: 0, color: message.type === 'ok' ? 'green' : 'crimson' }}
+        >
+          {message.text}
+        </p>
+      )}
+    </div>
+  );
+}

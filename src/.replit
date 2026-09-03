@@ -1,0 +1,56 @@
+modules = ["nodejs-24", "postgresql-16", "python-base-3.13"]
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+# [ن-7] رؤوس أمان على كل الاستجابات.
+# التطبيق SPA ثابت، فهذه أرخص طبقة حماية متاحة.
+[[deployment.responseHeaders]]
+path = "/*"
+name = "X-Content-Type-Options"
+value = "nosniff"
+
+[[deployment.responseHeaders]]
+path = "/*"
+name = "X-Frame-Options"
+value = "SAMEORIGIN"
+
+[[deployment.responseHeaders]]
+path = "/*"
+name = "Referrer-Policy"
+value = "strict-origin-when-cross-origin"
+
+[[deployment.responseHeaders]]
+path = "/*"
+name = "Strict-Transport-Security"
+value = "max-age=31536000; includeSubDomains"
+
+[[deployment.responseHeaders]]
+path = "/*"
+name = "Permissions-Policy"
+value = "geolocation=(), camera=(), microphone=(self), payment=()"
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
+
+[workflows]
+runButton = "Project"
+
+[agent]
+stack = "PNPM_WORKSPACE"
+expertMode = true
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+[nix]
+channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+VITE_SUPABASE_URL = "https://ykuvsnmddipctrylwxzh.supabase.co"
+VITE_APP_URL = "https://asset-manager-hshmhshm72.replit.app/"

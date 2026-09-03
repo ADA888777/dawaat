@@ -1,0 +1,129 @@
+// =====================================================================
+// خدمة المدعوين (البند 10)
+//   Add Guest / Update Guest / Delete Guest / Import Contact / Get Event Guests
+//
+// الأمان: سياسات RLS في قاعدة البيانات تضمن أن كل هذه العمليات
+// تعمل فقط على مدعوي مناسبات المستخدم الحالي — حتى لو عُدّل كود الواجهة.
+// =====================================================================
+import { supabase } from '../lib/supabaseClient';
+
+/** إضافة مدعو واحد */
+export async function addGuest({ eventId, name, phone = null, status = 'pending' }) {
+  if (!eventId) throw new Error('eventId مطلوب');
+  if (!name?.trim()) throw new Error('اسم المدعو مطلوب');
+
+  const { data, error } = await supabase
+    .from('guests')
+    .insert({
+      event_id: eventId,
+      name: name.trim(),
+      phone: phone?.trim() || null,
+      status,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** تحديث مدعو (تحديث جزئي — فقط الحقول الممرّرة) */
+export async function updateGuest(guestId, { name, phone, status } = {}) {
+  const updates = {};
+  if (name !== undefined) updates.name = name.trim();
+  if (phone !== undefined) updates.phone = phone?.trim() || null;
+  if (status !== undefined) {
+    const allowed = ['pending', 'accepted', 'declined', 'maybe'];
+    if (!allowed.includes(status)) throw new Error(`قيمة status غير صحيحة: ${status}`);
+    updates.status = status;
+  }
+  if (Object.keys(updates).length === 0) throw new Error('لا توجد حقول لتحديثها');
+
+  const { data, error } = await supabase
+    .from('guests')
+    .update(updates)
+    .eq('id', guestId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** حذف مدعو */
+export async function deleteGuest(guestId) {
+  const { error } = await supabase.from('guests').delete().eq('id', guestId);
+  if (error) throw error;
+  return true;
+}
+
+/** جلب مدعوي مناسبة معيّنة (مع فلترة اختيارية بالحالة) */
+export async function getEventGuests(eventId, { status = null } = {}) {
+  let query = supabase
+    .from('guests')
+    .select('*')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: false });
+
+  if (status) query = query.eq('status', status);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data;
+}
+
+/** ملخص أعداد الردود لمناسبة (pending / accepted / declined / maybe) */
+export async function getEventGuestStats(eventId) {
+  const guests = await getEventGuests(eventId);
+  return guests.reduce(
+    (acc, g) => {
+      acc.total += 1;
+      acc[g.status] = (acc[g.status] || 0) + 1;
+      return acc;
+    },
+    { total: 0, pending: 0, accepted: 0, declined: 0, maybe: 0 }
+  );
+}
+
+/**
+ * استيراد جهات اتصال دفعة واحدة (البند 9)
+ * contacts: [{ name, phone }, ...]
+ * - يتجاهل السطور الفارغة
+ * - يتجاهل الأرقام المكررة الموجودة مسبقاً في نفس المناسبة
+ */
+export async function importContacts(eventId, contacts) {
+  if (!eventId) throw new Error('eventId مطلوب');
+
+  const clean = (contacts || [])
+    .map((c) => ({
+      name: (c.name || '').trim(),
+      phone: (c.phone || '').trim(),
+    }))
+    .filter((c) => c.name || c.phone);
+
+  if (clean.length === 0) return [];
+
+  // جلب الأرقام الموجودة مسبقاً لتفادي التكرار
+  const { data: existing, error: exErr } = await supabase
+    .from('guests')
+    .select('phone')
+    .eq('event_id', eventId);
+  if (exErr) throw exErr;
+
+  const existingPhones = new Set(
+    (existing || []).map((g) => g.phone).filter(Boolean)
+  );
+
+  const rows = clean
+    .filter((c) => !c.phone || !existingPhones.has(c.phone))
+    .map((c) => ({
+      event_id: eventId,
+      name: c.name || 'بدون اسم',
+      phone: c.phone || null,
+      status: 'pending',
+    }));
+
+  if (rows.length === 0) return [];
+
+  const { data, error } = await supabase.from('guests').insert(rows).select();
+  if (error) throw error;
+  return data;
+}
