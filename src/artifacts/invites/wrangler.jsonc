@@ -1,12 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "dawat",
+  "name": "dawaat",
   "compatibility_date": "2026-09-01",
 
   "assets": {
-    // مجلد مخرجات البناء كما يضبطه vite.config.ts
-    "directory": "./dist/public"
-    // توجيه مسارات SPA يتم عبر public/_redirects بدلاً من not_found_handling،
-    // لأن وجود الاثنين معاً يجعل Wrangler يرفض النشر بخطأ «حلقة» في _redirects.
+    "directory": "./dist/public",
+    "not_found_handling": "single-page-application",
+    "html_handling": "none"
   }
 }
