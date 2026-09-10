@@ -48,6 +48,7 @@
     "@tanstack/react-query": "catalog:",
     "@types/node": "catalog:",
     "@types/papaparse": "^5.5.2",
+    "@types/qrcode": "^1.5.5",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
@@ -79,6 +80,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
-    "papaparse": "^5.5.4"
+    "papaparse": "^5.5.4",
+    "qrcode": "^1.5.4"
   }
 }
