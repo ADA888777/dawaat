@@ -24,6 +24,14 @@ const eventSchema = z.object({
   templateId: z.number().optional(),
   coverImage: z.string().optional(),
   audioFile: z.string().optional(),
+    contactPhone: z
+      .string()
+      .optional()
+      .refine(
+        (value) => !value || /^\+?[0-9\s()-]{9,20}$/.test(value),
+        "رقم غير صالح — مثال: 0501234567",
+      ),
+    contactMethod: z.enum(["call", "whatsapp", "both"]).optional(),
 });
 
 type EventFormValues = z.infer<typeof eventSchema>;
@@ -53,6 +61,8 @@ export default function EventForm() {
       eventDate: "",
       location: "",
       description: "",
+      contactPhone: "",
+      contactMethod: "both",
     }
   });
 
@@ -69,6 +79,8 @@ export default function EventForm() {
         templateId: eventData.templateId || undefined,
         coverImage: eventData.coverImage || undefined,
         audioFile: eventData.audioFile || undefined,
+        contactPhone: eventData.contactPhone || "",
+        contactMethod: eventData.contactMethod || "both",
       });
     }
   }, [eventData, form]);
@@ -353,6 +365,54 @@ export default function EventForm() {
                     )}
                   />
                 </div>
+                <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="contactPhone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>رقم التواصل للاستفسارات (اختياري)</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="0501234567"
+                            dir="ltr"
+                            inputMode="tel"
+                            className="text-right"
+                            {...field}
+                            value={field.value ?? ""}
+                          />
+                        </FormControl>
+                        <p className="text-xs text-gray-500">
+                          يظهر للمدعو داخل صفحة الدعوة مع زر اتصال أو واتساب.
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="contactMethod"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>طريقة التواصل المعروضة للمدعو</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value ?? "both"}>
+                          <FormControl>
+                            <SelectTrigger dir="rtl">
+                              <SelectValue placeholder="اختر الطريقة" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent dir="rtl">
+                            <SelectItem value="both">اتصال وواتساب</SelectItem>
+                            <SelectItem value="call">اتصال فقط</SelectItem>
+                            <SelectItem value="whatsapp">واتساب فقط</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
                 <div className="mt-8 flex justify-end">
                   <Button type="button" onClick={() => form.trigger(['title', 'category', 'eventDate', 'location']).then(valid => valid && setStep(2))} className="bg-ink hover:bg-ink-soft text-gold px-8">
                     التالي

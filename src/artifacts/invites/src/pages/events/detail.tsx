@@ -1,22 +1,42 @@
 import { appUrl } from "@/lib/supabase";
-import { useState, useRef } from "react";
+import { useMemo, useState } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import {
-  useGetEvent, useListGuests, useCreateGuest, useUpdateGuest,
-  useDeleteGuest, useBulkCreateGuests, MAX_IMPORT_ROWS, type Guest,
+  useGetEvent,
+  useListGuests,
+  useUpdateGuest,
+  useDeleteGuest,
+  useBulkCreateGuests,
+  useMarkInviteStatus,
+  MAX_IMPORT_ROWS,
+  type Guest,
 } from "@/lib/api";
 import { useParams, Link } from "wouter";
-import { Loader2, Plus, Upload, Trash2, Edit, Check, X, Search, ChevronRight, Download, Eye, BookUser, MessageCircle, Send } from "lucide-react";
-import { isContactPickerSupported, pickContacts } from "@/lib/contact-picker";
+import {
+  Loader2,
+  Plus,
+  Trash2,
+  Edit,
+  Search,
+  ChevronRight,
+  Eye,
+  MessageCircle,
+  Send,
+  QrCode as QrIcon,
+  Copy,
+  Check,
+  Download,
+  Info,
+  CheckSquare,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -25,439 +45,493 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useQueryClient } from "@tanstack/react-query";
-import { getListGuestsQueryKey, getGetEventQueryKey } from "@/lib/api";
-import Papa from "papaparse";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ContactImportDialog } from "@/components/contact-import-dialog";
+import { QrCode, useQrDataUrl } from "@/components/qr-code";
+import {
+  buildGuestInviteUrl,
+  buildInviteMessage,
+  buildPublicInviteUrl,
+  buildWhatsAppUrl,
+  getGuestDisplayStatus,
+  GUEST_STATUS_CLASSES,
+  GUEST_STATUS_LABELS,
+  GUEST_STATUS_ORDER,
+  statusSelectionToUpdate,
+  type GuestDisplayStatus,
+} from "@/lib/invite";
+import type { PickedContact } from "@/lib/contact-picker";
 
 /**
  * [م-7] الأصل الصحيح لروابط الدعوات.
  * window.location.origin وحده كان يتجاهل base الخاص بـ Vite،
  * فتُرسل روابط مكسورة إذا نُشر التطبيق تحت مسار فرعي.
  */
-/**
- * [ن-8] تحويل الرقم المحلي إلى صيغة واتساب الدولية.
- * الافتراض الافتراضي هو السعودية (966) لأنه سوق التطبيق الأساسي؛
- * الأرقام المكتوبة بصيغة دولية (+xx) تُترك كما هي.
- */
-const DEFAULT_COUNTRY_CODE = "966";
-
-function toWhatsAppNumber(raw: string): string {
-  const digits = raw.replace(/\D/g, "");
-  if (raw.trim().startsWith("+")) return digits;      // دولي صريح
-  if (digits.startsWith("00")) return digits.slice(2); // بادئة 00 الدولية
-  if (digits.startsWith(DEFAULT_COUNTRY_CODE)) return digits;
-  if (digits.startsWith("0")) return DEFAULT_COUNTRY_CODE + digits.slice(1);
-  return DEFAULT_COUNTRY_CODE + digits;
-}
-
-const APP_ORIGIN =
-  appUrl.replace(/\/$/, "");
+const APP_ORIGIN = appUrl.replace(/\/$/, "");
 
 export default function EventDetail() {
   const { id } = useParams();
   const eventId = Number(id);
   const { data: event, isLoading: isLoadingEvent } = useGetEvent(eventId);
   const { data: guests, isLoading: isLoadingGuests } = useListGuests(eventId);
-  const [searchTerm, setSearchTerm] = useState("");
+  const { toast } = useToast();
 
-  const queryClient = useQueryClient();
-  
-  const createGuest = useCreateGuest();
   const updateGuest = useUpdateGuest();
   const deleteGuest = useDeleteGuest();
   const bulkCreateGuests = useBulkCreateGuests();
+  const markInviteStatus = useMarkInviteStatus();
 
-  const [isAddGuestOpen, setIsAddGuestOpen] = useState(false);
-  const [newGuestName, setNewGuestName] = useState("");
-  const [newGuestPhone, setNewGuestPhone] = useState("");
-  const [isPickingContacts, setIsPickingContacts] = useState(false);
-  const [sendAllIndex, setSendAllIndex] = useState<number | null>(null);
-  const contactPickerSupported = isContactPickerSupported();
-  const { toast } = useToast();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isQrOpen, setIsQrOpen] = useState(false);
+  const [guestToDelete, setGuestToDelete] = useState<Guest | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  const handlePickFromContacts = async () => {
-    setIsPickingContacts(true);
-    try {
-      const picked = await pickContacts();
-      if (picked.length === 0) return; // user cancelled or no usable entries
+  // قائمة الإرسال: لقطة من المدعوين المحددين لحظة الضغط على الزر
+  const [sendQueue, setSendQueue] = useState<Guest[] | null>(null);
+  const [sendIndex, setSendIndex] = useState(0);
+  const [openedCurrent, setOpenedCurrent] = useState(false);
 
-      if (picked.length === 1) {
-        // Single contact: prefill the manual fields so the user can review/edit.
-        setNewGuestName(picked[0].name);
-        setNewGuestPhone(picked[0].phone);
-        return;
-      }
+  const filteredGuests = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return guests ?? [];
+    return (guests ?? []).filter(
+      (g) => g.name.toLowerCase().includes(q) || g.phone.includes(q),
+    );
+  }, [guests, searchTerm]);
 
-      // Multiple contacts: add them all to the guest list directly.
-      bulkCreateGuests.mutate({ eventId, data: { guests: picked } }, {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListGuestsQueryKey(eventId) });
-          queryClient.invalidateQueries({ queryKey: getGetEventQueryKey(eventId) });
-          setIsAddGuestOpen(false);
-          setNewGuestName("");
-          setNewGuestPhone("");
-          toast({ title: `تمت إضافة ${picked.length} مدعوين من جهات الاتصال` });
-        },
-        onError: () => {
-          toast({ title: "تعذر إضافة المدعوين، حاول مرة أخرى", variant: "destructive" });
-        },
-      });
-    } catch {
-      toast({
-        title: "تعذر فتح جهات الاتصال",
-        description: "متصفحك لا يدعم هذه الميزة أو تم رفض الإذن. يمكنك الإدخال اليدوي أو استيراد CSV.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsPickingContacts(false);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const visibleIds = useMemo(() => filteredGuests.map((g) => g.id), [filteredGuests]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((gid) => selectedSet.has(gid));
+  const selectedGuests = useMemo(
+    () => (guests ?? []).filter((g) => selectedSet.has(g.id)),
+    [guests, selectedSet],
+  );
+
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) {
+      setSelectedIds((prev) => prev.filter((gid) => !visibleIds.includes(gid)));
+    } else {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
     }
   };
 
-  const handleAddGuest = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newGuestName || !newGuestPhone) return;
-    createGuest.mutate({ eventId, data: { name: newGuestName, phone: newGuestPhone } }, {
-      onSuccess: () => {
-        setIsAddGuestOpen(false);
-        setNewGuestName("");
-        setNewGuestPhone("");
-        queryClient.invalidateQueries({ queryKey: getListGuestsQueryKey(eventId) });
-        queryClient.invalidateQueries({ queryKey: getGetEventQueryKey(eventId) });
-      }
+  const toggleOne = (gid: number) =>
+    setSelectedIds((prev) =>
+      prev.includes(gid) ? prev.filter((x) => x !== gid) : [...prev, gid],
+    );
+
+  // ────────────────────────── الروابط والرسائل ──────────────────────────
+
+  const publicInviteUrl = event ? buildPublicInviteUrl(APP_ORIGIN, event.shareSlug) : "";
+
+  const guestInviteUrl = (guest: Guest) =>
+    event ? buildGuestInviteUrl(APP_ORIGIN, event.shareSlug, guest.inviteToken) : "";
+
+  const messageFor = (guest: Guest) =>
+    buildInviteMessage({
+      guestName: guest.name,
+      eventTitle: event?.title ?? "",
+      inviteUrl: guestInviteUrl(guest),
+      eventDate: event?.eventDate,
+      location: event?.location,
     });
+
+  const copyText = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // متصفحات قديمة أو سياق غير آمن: بديل صامت حتى لا يفقد المستخدم النص
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    setCopiedKey(key);
+    window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1800);
   };
 
-  const handleStatusChange = (guestId: number, status: 'pending' | 'attending' | 'maybe' | 'declined') => {
-    updateGuest.mutate({ id: guestId, data: { attendanceStatus: status } }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListGuestsQueryKey(eventId) });
-        queryClient.invalidateQueries({ queryKey: getGetEventQueryKey(eventId) });
-      }
-    });
+  // ────────────────────────── الاستيراد ──────────────────────────
+
+  const handleImport = (contacts: PickedContact[]) => {
+    bulkCreateGuests.mutate(
+      { eventId, data: { guests: contacts } },
+      {
+        onSuccess: (res) => {
+          setIsImportOpen(false);
+          toast({
+            title: "تمت إضافة " + res.created + " مدعو",
+            description:
+              res.skipped > 0
+                ? "تم تجاهل " + res.skipped + " (مكرر أو رقم غير صالح)"
+                : undefined,
+          });
+        },
+        onError: (err) =>
+          toast({
+            title: "تعذر إضافة المدعوين",
+            description: err instanceof Error ? err.message : undefined,
+            variant: "destructive",
+          }),
+      },
+    );
   };
 
-  const sendWhatsApp = (guest: Guest) => {
-    sendWhatsAppDirect(guest);
+  // ────────────────────────── الحالة ──────────────────────────
+
+  const handleStatusChange = (guest: Guest, next: GuestDisplayStatus) => {
+    updateGuest.mutate(
+      { id: guest.id, data: statusSelectionToUpdate(next) },
+      {
+        onError: (err) =>
+          toast({
+            title: "تعذر تحديث الحالة",
+            description: err instanceof Error ? err.message : undefined,
+            variant: "destructive",
+          }),
+      },
+    );
   };
-
-  // [ن-1] حوار داخل التطبيق بدل confirm() المتوقف عن العمل بمظهر المتصفح
-  const [guestToDelete, setGuestToDelete] = useState<Guest | null>(null);
-
-  const handleDeleteGuest = (guest: Guest) => setGuestToDelete(guest);
 
   const confirmDeleteGuest = () => {
     if (!guestToDelete) return;
-    deleteGuest.mutate({ id: guestToDelete.id }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListGuestsQueryKey(eventId) });
-        queryClient.invalidateQueries({ queryKey: getGetEventQueryKey(eventId) });
-        setGuestToDelete(null);
-        toast({ title: "تم حذف المدعو" });
-      },
-      onError: (err) => {
-        setGuestToDelete(null);
-        toast({
-          title: "تعذر حذف المدعو",
-          description: err instanceof Error ? err.message : undefined,
-          variant: "destructive",
-        });
-      },
-    });
-  };
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  /**
-   * [م-8] استيراد CSV محكوم:
-   * سقف لعدد الصفوف، وتحقق من الأرقام، وإبلاغ صريح بعدد المرفوض،
-   * وإشعارات بدل alert(). سابقاً كان الملف يُقرأ كاملاً بلا حد.
-   */
-  const handleBulkImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    Papa.parse<Record<string, string>>(file, {
-      header: true,
-      skipEmptyLines: true,
-      error: () => {
-        toast({ title: "تعذر قراءة الملف", description: "تأكد أنه ملف CSV صالح", variant: "destructive" });
-      },
-      complete: (results) => {
-        const parsedGuests = results.data
-          .map((row) => ({
-            name: row.name || row["الاسم"] || row["Name"] || "",
-            phone: row.phone || row["رقم الجوال"] || row["Phone"] || "",
-          }))
-          .filter((g) => g.name.trim() && g.phone.trim());
-
-        if (parsedGuests.length === 0) {
+    const removedId = guestToDelete.id;
+    deleteGuest.mutate(
+      { id: removedId },
+      {
+        onSuccess: () => {
+          setSelectedIds((prev) => prev.filter((gid) => gid !== removedId));
+          setGuestToDelete(null);
+          toast({ title: "تم حذف المدعو" });
+        },
+        onError: (err) => {
+          setGuestToDelete(null);
           toast({
-            title: "لم يتم العثور على بيانات صالحة",
-            description: "تأكد من وجود عمودي Name و Phone في الملف",
+            title: "تعذر حذف المدعو",
+            description: err instanceof Error ? err.message : undefined,
             variant: "destructive",
           });
-          return;
-        }
-
-        if (parsedGuests.length > MAX_IMPORT_ROWS) {
-          toast({
-            title: "الملف كبير جداً",
-            description: `الحد الأقصى ${MAX_IMPORT_ROWS} مدعو في الاستيراد الواحد (الملف يحوي ${parsedGuests.length})`,
-            variant: "destructive",
-          });
-          return;
-        }
-
-        bulkCreateGuests.mutate(
-          { eventId, data: { guests: parsedGuests } },
-          {
-            onSuccess: (res) => {
-              queryClient.invalidateQueries({ queryKey: getListGuestsQueryKey(eventId) });
-              queryClient.invalidateQueries({ queryKey: getGetEventQueryKey(eventId) });
-              toast({
-                title: `تم استيراد ${res.created} مدعو`,
-                description: res.skipped > 0
-                  ? `تم تجاهل ${res.skipped} صفاً (مكرر أو رقم غير صالح)`
-                  : undefined,
-              });
-            },
-            onError: (err) => {
-              toast({
-                title: "فشل الاستيراد",
-                description: err instanceof Error ? err.message : undefined,
-                variant: "destructive",
-              });
-            },
-          }
-        );
+        },
       },
-    });
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    );
   };
 
-  // [ع-4] إرسال متسلسل حقيقي.
-  // سابقاً كان sendAllIndex يُكتب ولا يُقرأ في أي مكان، فكان الزر
-  // يفتح واتساب للمدعو الأول فقط رغم أن اسمه يعد بإرسال للجميع.
-  const pendingGuests = (guests ?? []).filter((g) => g.attendanceStatus === "pending");
-
-  const handleSendAll = () => {
-    if (pendingGuests.length === 0) {
-      toast({ title: "لا يوجد مدعوون بانتظار الرد" });
-      return;
-    }
-    setSendAllIndex(0);
-    sendWhatsAppDirect(pendingGuests[0]);
-  };
-
-  const handleSendNext = () => {
-    if (sendAllIndex === null) return;
-    const next = sendAllIndex + 1;
-    if (next >= pendingGuests.length) {
-      setSendAllIndex(null);
-      toast({ title: `اكتمل إرسال الدعوات إلى ${pendingGuests.length} مدعو` });
-      return;
-    }
-    setSendAllIndex(next);
-    sendWhatsAppDirect(pendingGuests[next]);
-  };
-
+  // ────────────────── إرسال الدعوات: التدفق الحقيقي ──────────────────
   /**
-   * [ح-2] الرابط يحمل رمز الدعوة الشخصي فقط.
-   * سابقاً كان يحمل ?phone= و ?name= بنص صريح — أي أن تمرير الرسالة
-   * كان يكشف رقم المدعو ويتيح لأي شخص الرد بالنيابة عنه.
+   * ما يحدث فعلياً عند الضغط على "إرسال الدعوات":
+   *   1) تُسجَّل حالة "تم تجهيز الدعوة" لكل المحددين في قاعدة البيانات.
+   *   2) تُفتح محادثة واتساب لكل مدعو برسالته الجاهزة، واحداً بعد الآخر.
+   *   3) الضغط على زر الإرسال داخل واتساب يبقى على المستخدم — لا يستطيع أي
+   *      موقع إرسال رسالة واتساب نيابةً عن صاحبه، وهذا قيد من واتساب نفسه.
+   *   4) بعد تأكيد المستخدم أنه أرسل، تُسجَّل حالة "تم الإرسال".
+   *
+   * الإرسال التلقائي الجماعي بلا فتح أي محادثة يحتاج
+   * WhatsApp Business Platform (Cloud API) وهو تكامل من الخادم بقوالب
+   * معتمدة، ولم يُزيَّف هنا كزر وهمي داخل الواجهة.
    */
-  const sendWhatsAppDirect = (guest: Guest) => {
-    const waNumber = toWhatsAppNumber(guest.phone);
-    const inviteUrl = `${APP_ORIGIN}/invite/${event?.shareSlug}?t=${guest.inviteToken}`;
-    const msg = `السلام عليكم ${guest.name}\nيسعدنا دعوتك لحضور ${event?.title}\nرابط الدعوة: ${inviteUrl}`;
-    window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
+  const startSending = () => {
+    if (selectedGuests.length === 0) {
+      toast({ title: "اختر مدعوّاً واحداً على الأقل" });
+      return;
+    }
+    markInviteStatus.mutate({
+      eventId,
+      guestIds: selectedGuests.map((g) => g.id),
+      status: "prepared",
+    });
+    setSendQueue(selectedGuests);
+    setSendIndex(0);
+    setOpenedCurrent(false);
   };
+
+  const currentSendGuest =
+    sendQueue && sendIndex < sendQueue.length ? sendQueue[sendIndex] : null;
+
+  const closeSendQueue = () => {
+    setSendQueue(null);
+    setSendIndex(0);
+    setOpenedCurrent(false);
+  };
+
+  const advanceQueue = () => {
+    if (!sendQueue) return;
+    const next = sendIndex + 1;
+    if (next >= sendQueue.length) {
+      toast({ title: "انتهت قائمة الإرسال (" + sendQueue.length + " مدعو)" });
+      closeSendQueue();
+      return;
+    }
+    setSendIndex(next);
+    setOpenedCurrent(false);
+  };
+
+  const openWhatsAppFor = (guest: Guest) => {
+    window.open(buildWhatsAppUrl(guest.phone, messageFor(guest)), "_blank", "noopener");
+    setOpenedCurrent(true);
+  };
+
+  const markSentAndNext = () => {
+    if (!currentSendGuest) return;
+    markInviteStatus.mutate({
+      eventId,
+      guestIds: [currentSendGuest.id],
+      status: "sent",
+    });
+    advanceQueue();
+  };
+
+  /** إرسال لمدعو واحد من صف الجدول: يفتح واتساب ويسجّل "تم تجهيز الدعوة" */
+  const sendSingle = (guest: Guest) => {
+    markInviteStatus.mutate({ eventId, guestIds: [guest.id], status: "prepared" });
+    window.open(buildWhatsAppUrl(guest.phone, messageFor(guest)), "_blank", "noopener");
+  };
+
+  const qr = useQrDataUrl(publicInviteUrl, 640);
 
   if (isLoadingEvent) {
     return (
       <AppLayout>
-        <div className="flex justify-center py-32"><Loader2 className="w-8 h-8 animate-spin text-gold" /></div>
+        <div className="flex justify-center py-32">
+          <Loader2 className="h-8 w-8 animate-spin text-gold" />
+        </div>
       </AppLayout>
     );
   }
 
-  if (!event) return <AppLayout><div className="p-10 text-center">المناسبة غير موجودة</div></AppLayout>;
+  if (!event) {
+    return (
+      <AppLayout>
+        <div className="p-10 text-center">المناسبة غير موجودة</div>
+      </AppLayout>
+    );
+  }
 
-  const filteredGuests = guests?.filter(g => 
-    g.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    g.phone.includes(searchTerm)
-  ) || [];
+  const awaitingSend = (guests ?? []).filter(
+    (g) => getGuestDisplayStatus(g, event.eventDate) === "pending",
+  ).length;
 
   return (
     <AppLayout>
-      <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-6">
-        <Link href="/events" className="text-gray-600 hover:text-gray-900 inline-flex items-center gap-1 text-sm font-medium">
-          <ChevronRight className="w-4 h-4" /> العودة للدعوات
+      <div className="mx-auto max-w-7xl space-y-6 p-6 md:p-10">
+        <Link
+          href="/events"
+          className="inline-flex items-center gap-1 text-sm font-medium text-gray-600 hover:text-gray-900"
+        >
+          <ChevronRight className="h-4 w-4" /> العودة للدعوات
         </Link>
-        
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+
+        <div className="flex flex-col items-start gap-4 rounded-xl border border-gray-100 bg-white p-6 shadow-sm md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">{event.title}</h1>
-            <div className="flex gap-4 text-sm text-gray-600">
+            <h1 className="mb-2 text-3xl font-bold text-gray-900">{event.title}</h1>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
               <span>المدعوين: {event.guestsCount}</span>
+              <span className="text-gray-500">بانتظار الإرسال: {awaitingSend}</span>
+              <span className="text-indigo-600">تم الإرسال: {event.sentCount}</span>
               <span className="text-emerald-600">مؤكد: {event.attendingCount}</span>
               <span className="text-red-500">معتذر: {event.declinedCount}</span>
               <span className="text-orange-500">محتمل: {event.maybeCount}</span>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => window.open(`/invite/${event.shareSlug}`, '_blank')} className="border-gray-200">
-              <Eye className="w-4 h-4 mr-2" /> معاينة الدعوة
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              className="border-gray-200"
+              onClick={() => setIsQrOpen(true)}
+            >
+              <QrIcon className="ml-2 h-4 w-4" /> رمز QR والرابط
             </Button>
-            <Link href={`/events/${event.id}/edit`}>
+            <Button
+              variant="outline"
+              className="border-gray-200"
+              onClick={() => window.open(publicInviteUrl, "_blank", "noopener")}
+            >
+              <Eye className="ml-2 h-4 w-4" /> معاينة الدعوة
+            </Button>
+            <Link href={"/events/" + event.id + "/edit"}>
               <Button className="bg-ink text-gold-light hover:bg-ink-soft">
-                <Edit className="w-4 h-4 mr-2" /> تعديل المناسبة
+                <Edit className="ml-2 h-4 w-4" /> تعديل المناسبة
               </Button>
             </Link>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row justify-between gap-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input 
-                placeholder="البحث عن مدعو بالاسم أو الجوال..." 
+        <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+          <div className="flex flex-col gap-4 border-b border-gray-100 p-6 md:flex-row md:items-center md:justify-between">
+            <div className="relative max-w-md flex-1">
+              <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input
+                placeholder="البحث عن مدعو بالاسم أو الجوال..."
                 className="pl-4 pr-10"
                 value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
+                onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              {/* زر إرسال الدعوة للجميع */}
-              {(guests ?? []).filter(g => g.attendanceStatus === 'pending').length > 0 && (
-                <Button
-                  onClick={handleSendAll}
-                  className="bg-green-600 hover:bg-green-700 text-white font-medium"
-                >
-                  <Send className="w-4 h-4 ml-2" />
-                  إرسال للجميع ({(guests ?? []).filter(g => g.attendanceStatus === 'pending').length})
-                </Button>
-              )}
-              <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleBulkImport} />
-              <Button variant="outline" className="border-gray-200" onClick={() => fileInputRef.current?.click()} disabled={bulkCreateGuests.isPending}>
-                {bulkCreateGuests.isPending ? <Loader2 className="w-4 h-4 ml-2 animate-spin" /> : <Upload className="w-4 h-4 ml-2" />}
-                استيراد CSV
+              <Button
+                variant="outline"
+                className="border-gray-200"
+                onClick={toggleSelectAll}
+                disabled={visibleIds.length === 0}
+              >
+                <CheckSquare className="ml-2 h-4 w-4" />
+                {allVisibleSelected ? "إلغاء تحديد الكل" : "تحديد الكل"}
               </Button>
-              <Dialog open={isAddGuestOpen} onOpenChange={setIsAddGuestOpen}>
-                <DialogTrigger asChild>
-                  <Button className="bg-gold text-black hover:bg-gold/90 font-medium">
-                    <Plus className="w-4 h-4 ml-2" /> إضافة مدعو
-                  </Button>
-                </DialogTrigger>
-                <DialogContent dir="rtl">
-                  <DialogHeader>
-                    <DialogTitle>إضافة مدعو جديد</DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleAddGuest} className="space-y-4 py-4">
-                    <div>
-                      <label className="text-sm font-medium mb-1 block">الاسم</label>
-                      <Input value={newGuestName} onChange={e => setNewGuestName(e.target.value)} required />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-1 block">رقم الجوال</label>
-                      <Input value={newGuestPhone} onChange={e => setNewGuestPhone(e.target.value)} required dir="ltr" className="text-right" />
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <div className="h-px flex-1 bg-gray-200" />
-                      <span className="text-xs text-gray-400">أو</span>
-                      <div className="h-px flex-1 bg-gray-200" />
-                    </div>
-
-                    <div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full border-gold/40 text-gold-deep hover:bg-gold/10"
-                        onClick={handlePickFromContacts}
-                        disabled={!contactPickerSupported || isPickingContacts || bulkCreateGuests.isPending}
-                      >
-                        {isPickingContacts || bulkCreateGuests.isPending ? (
-                          <Loader2 className="w-4 h-4 ml-2 animate-spin" />
-                        ) : (
-                          <BookUser className="w-4 h-4 ml-2" />
-                        )}
-                        استيراد من جهات الاتصال
-                      </Button>
-                      <p className="text-xs text-gray-400 mt-2 text-center">
-                        {contactPickerSupported
-                          ? "يمكنك اختيار شخص واحد أو عدة أشخاص دفعة واحدة"
-                          : "غير متاح في هذا المتصفح — متوفر غالباً في كروم على أندرويد"}
-                      </p>
-                    </div>
-
-                    <DialogFooter className="mt-6">
-                      <Button type="submit" disabled={createGuest.isPending} className="bg-ink text-gold-light hover:bg-ink-soft w-full">
-                        {createGuest.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'إضافة'}
-                      </Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
+              <Button
+                onClick={startSending}
+                disabled={selectedIds.length === 0}
+                className="bg-green-600 font-medium text-white hover:bg-green-700"
+              >
+                <Send className="ml-2 h-4 w-4" />
+                إرسال الدعوات
+                {selectedIds.length > 0 ? " (" + selectedIds.length + ")" : ""}
+              </Button>
+              <Button
+                onClick={() => setIsImportOpen(true)}
+                className="bg-gold font-medium text-black hover:bg-gold/90"
+              >
+                <Plus className="ml-2 h-4 w-4" /> استيراد من جهات الاتصال
+              </Button>
             </div>
           </div>
 
+          {selectedIds.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 bg-gold/5 px-6 py-3 text-sm">
+              <span className="font-medium text-gray-800">
+                محدد: {selectedIds.length} مدعو
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedIds([])}
+                className="text-xs text-gray-600 underline"
+              >
+                إلغاء التحديد
+              </button>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full text-right text-sm">
-              <thead className="bg-gray-50 text-gray-600 font-medium">
+              <thead className="bg-gray-50 font-medium text-gray-600">
                 <tr>
+                  <th className="w-12 px-4 py-4">
+                    <Checkbox
+                      checked={allVisibleSelected}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="تحديد الكل"
+                    />
+                  </th>
                   <th className="px-6 py-4">الاسم</th>
                   <th className="px-6 py-4">رقم الجوال</th>
-                  <th className="px-6 py-4">حالة الحضور</th>
-                  <th className="px-6 py-4 w-24">إجراءات</th>
+                  <th className="px-6 py-4">الحالة</th>
+                  <th className="w-32 px-6 py-4">إجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {isLoadingGuests ? (
-                  <tr><td colSpan={4} className="px-6 py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
+                  <tr>
+                    <td colSpan={5} className="px-6 py-10 text-center">
+                      <Loader2 className="mx-auto h-6 w-6 animate-spin text-gray-400" />
+                    </td>
+                  </tr>
                 ) : filteredGuests.length === 0 ? (
-                  <tr><td colSpan={4} className="px-6 py-10 text-center text-gray-600">لا يوجد مدعوين</td></tr>
+                  <tr>
+                    <td colSpan={5} className="px-6 py-10 text-center text-gray-600">
+                      لا يوجد مدعوين — ابدأ بزر «استيراد من جهات الاتصال»
+                    </td>
+                  </tr>
                 ) : (
-                  filteredGuests.map(guest => (
-                    <tr key={guest.id} className="hover:bg-gray-50/50">
-                      <td className="px-6 py-4 font-medium text-gray-900">{guest.name}</td>
-                      <td className="px-6 py-4 text-gray-600" dir="ltr">{guest.phone}</td>
-                      <td className="px-6 py-4">
-                        <Select 
-                          value={guest.attendanceStatus} 
-                          onValueChange={(val: any) => handleStatusChange(guest.id, val)}
-                        >
-                          <SelectTrigger className={`h-8 text-xs font-medium w-32 ${
-                            guest.attendanceStatus === 'attending' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                            guest.attendanceStatus === 'declined' ? 'bg-red-50 text-red-700 border-red-200' :
-                            guest.attendanceStatus === 'maybe' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                            'bg-gray-50 text-gray-700 border-gray-200'
-                          }`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent dir="rtl">
-                            <SelectItem value="pending">بانتظار الرد</SelectItem>
-                            <SelectItem value="attending">مؤكد</SelectItem>
-                            <SelectItem value="maybe">محتمل</SelectItem>
-                            <SelectItem value="declined">معتذر</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="icon" onClick={() => sendWhatsApp(guest)} className="text-green-600 hover:text-green-700 hover:bg-green-50 h-8 w-8" title="إرسال الدعوة عبر واتساب">
-                            <MessageCircle className="w-4 h-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteGuest(guest)} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8" title="حذف المدعو">
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                  filteredGuests.map((guest) => {
+                    const status = getGuestDisplayStatus(guest, event.eventDate);
+                    const isSelected = selectedSet.has(guest.id);
+                    return (
+                      <tr
+                        key={guest.id}
+                        className={isSelected ? "bg-gold/5" : "hover:bg-gray-50/50"}
+                      >
+                        <td className="px-4 py-4">
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleOne(guest.id)}
+                            aria-label={"تحديد " + guest.name}
+                          />
+                        </td>
+                        <td className="px-6 py-4 font-medium text-gray-900">
+                          {guest.name}
+                        </td>
+                        <td className="px-6 py-4 text-gray-600" dir="ltr">
+                          {guest.phone}
+                        </td>
+                        <td className="px-6 py-4">
+                          <Select
+                            value={status}
+                            onValueChange={(val) =>
+                              handleStatusChange(guest, val as GuestDisplayStatus)
+                            }
+                          >
+                            <SelectTrigger
+                              className={
+                                "h-8 w-40 text-xs font-medium " +
+                                GUEST_STATUS_CLASSES[status]
+                              }
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent dir="rtl">
+                              {GUEST_STATUS_ORDER.map((option) => (
+                                <SelectItem key={option} value={option}>
+                                  {GUEST_STATUS_LABELS[option]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => sendSingle(guest)}
+                              className="h-8 w-8 text-green-600 hover:bg-green-50 hover:text-green-700"
+                              title="فتح واتساب برسالة الدعوة جاهزة"
+                            >
+                              <MessageCircle className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() =>
+                                copyText(guestInviteUrl(guest), "link-" + guest.id)
+                              }
+                              className="h-8 w-8 text-gray-500 hover:bg-gray-100"
+                              title="نسخ رابط الدعوة الخاص بهذا المدعو"
+                            >
+                              {copiedKey === "link-" + guest.id ? (
+                                <Check className="h-4 w-4 text-emerald-600" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setGuestToDelete(guest)}
+                              className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-700"
+                              title="حذف المدعو"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -465,31 +539,154 @@ export default function EventDetail() {
         </div>
       </div>
 
-      {/* [ع-4] شريط التقدّم في الإرسال المتسلسل — يظهر فقط أثناء الإرسال */}
-      {sendAllIndex !== null && (
-        <div className="fixed bottom-0 inset-x-0 z-50 bg-white border-t border-gray-200 shadow-lg p-4">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-            <p className="text-sm text-gray-700">
-              تم فتح واتساب للمدعو {sendAllIndex + 1} من {pendingGuests.length}
-              {pendingGuests[sendAllIndex] ? ` — ${pendingGuests[sendAllIndex].name}` : ""}
+      {/* رمز QR ورابط الدعوة العام */}
+      <Dialog open={isQrOpen} onOpenChange={setIsQrOpen}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>رمز QR ورابط الدعوة</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4">
+            <QrCode value={publicInviteUrl} size={200} />
+            <p className="break-all text-center text-xs text-gray-600" dir="ltr">
+              {publicInviteUrl}
             </p>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setSendAllIndex(null)}>
-                إيقاف
+            <div className="flex w-full flex-wrap gap-2">
+              <Button
+                variant="outline"
+                className="flex-1 border-gray-200"
+                onClick={() => copyText(publicInviteUrl, "public-link")}
+              >
+                {copiedKey === "public-link" ? (
+                  <Check className="ml-2 h-4 w-4 text-emerald-600" />
+                ) : (
+                  <Copy className="ml-2 h-4 w-4" />
+                )}
+                نسخ الرابط
               </Button>
-              <Button onClick={handleSendNext} className="bg-green-600 hover:bg-green-700 text-white">
-                {sendAllIndex + 1 >= pendingGuests.length ? "إنهاء" : "المدعو التالي"}
-              </Button>
+              {qr.dataUrl && (
+                <a
+                  href={qr.dataUrl}
+                  download={"dawaat-qr-" + event.shareSlug + ".png"}
+                  className="flex-1"
+                >
+                  <Button variant="outline" className="w-full border-gray-200">
+                    <Download className="ml-2 h-4 w-4" /> تنزيل الصورة
+                  </Button>
+                </a>
+              )}
             </div>
+            <p className="text-center text-xs text-gray-500">
+              نفس الرمز يظهر داخل صفحة الدعوة، يمسحه المدعو فتُفتح الدعوة مباشرة.
+            </p>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
+
+      {/* قائمة الإرسال المتسلسل */}
+      <Dialog
+        open={currentSendGuest !== null}
+        onOpenChange={(open) => !open && closeSendQueue()}
+      >
+        <DialogContent dir="rtl" className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              إرسال الدعوات — {sendIndex + 1} من {sendQueue ? sendQueue.length : 0}
+            </DialogTitle>
+          </DialogHeader>
+
+          {currentSendGuest && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-gray-200 p-4">
+                <p className="text-sm font-semibold text-gray-900">
+                  {currentSendGuest.name}
+                </p>
+                <p className="text-sm text-gray-600" dir="ltr">
+                  {currentSendGuest.phone}
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-1 text-xs font-medium text-gray-600">الرسالة الجاهزة</p>
+                <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-800">{messageFor(currentSendGuest)}</pre>
+              </div>
+
+              <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs leading-relaxed text-sky-900">
+                <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  الموقع يفتح محادثة واتساب والرسالة مكتوبة مسبقاً، والضغط على زر
+                  الإرسال داخل واتساب يبقى عليك — لا يستطيع أي موقع إرسال رسالة واتساب
+                  نيابةً عنك. الإرسال التلقائي الجماعي بلا فتح المحادثات يحتاج
+                  WhatsApp Business Platform (Cloud API) من الخادم بقوالب معتمدة.
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <Button
+                  onClick={() => openWhatsAppFor(currentSendGuest)}
+                  className="bg-green-600 text-white hover:bg-green-700"
+                >
+                  <MessageCircle className="ml-2 h-4 w-4" /> فتح واتساب
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-gray-200"
+                  onClick={() =>
+                    copyText(messageFor(currentSendGuest), "msg-" + currentSendGuest.id)
+                  }
+                >
+                  {copiedKey === "msg-" + currentSendGuest.id ? (
+                    <Check className="ml-2 h-4 w-4 text-emerald-600" />
+                  ) : (
+                    <Copy className="ml-2 h-4 w-4" />
+                  )}
+                  نسخ الرسالة
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3">
+                <button
+                  type="button"
+                  onClick={advanceQueue}
+                  className="text-sm text-gray-600 underline"
+                >
+                  تخطي هذا المدعو
+                </button>
+                <Button
+                  onClick={markSentAndNext}
+                  disabled={!openedCurrent}
+                  title={openedCurrent ? undefined : "افتح واتساب أولاً"}
+                  className="bg-ink text-gold-light hover:bg-ink-soft"
+                >
+                  <Check className="ml-2 h-4 w-4" /> أرسلتها — التالي
+                </Button>
+              </div>
+
+              <p className="text-center text-xs text-gray-500">
+                حالة «تم تجهيز الدعوة» سُجّلت لكل المحددين، وحالة «تم الإرسال» تُسجَّل
+                لهذا المدعو بعد تأكيدك فقط.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <ContactImportDialog
+        open={isImportOpen}
+        onOpenChange={setIsImportOpen}
+        maxRows={MAX_IMPORT_ROWS}
+        isSaving={bulkCreateGuests.isPending}
+        onImport={handleImport}
+      />
 
       <ConfirmDialog
         open={guestToDelete !== null}
         onOpenChange={(open) => !open && setGuestToDelete(null)}
         title="حذف المدعو"
-        description={guestToDelete ? `سيتم حذف "${guestToDelete.name}" وردّه نهائياً.` : undefined}
+        description={
+          guestToDelete
+            ? "سيتم حذف " + guestToDelete.name + " وردّه نهائياً."
+            : undefined
+        }
         confirmLabel="حذف"
         destructive
         isPending={deleteGuest.isPending}
