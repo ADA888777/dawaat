@@ -367,7 +367,8 @@ export function parseContactLines(raw: string): PickedContact[] {
     if (!isValidContactPhone(phone)) continue;
     const name = trimmed
       .replace(match[0], " ")
-      .replace(/[,;|\t]+/g, " ")
+      // يُزال أيضاً الفاصل العربي ، والفاصلة المنقوطة ؛ لأنهما الأكثر استعمالاً في اللوائح العربية
+      .replace(/[,;|\t\u060C\u061B]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
     out.push({ name: name || phone, phone });
