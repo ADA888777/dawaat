@@ -7,13 +7,19 @@ import {
   useGetGuestByToken,
   useSubmitRsvpByToken,
 } from "@/lib/api";
-import { Loader2, Music, MapPin, Calendar as CalendarIcon, Check, PartyPopper, X } from "lucide-react";
+import { Loader2, Music, MapPin, Calendar as CalendarIcon, Check, PartyPopper, X, Phone, MessageCircle } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { appUrl } from "@/lib/supabase";
+import { QrCode } from "@/components/qr-code";
+import { buildPublicInviteUrl, toDialNumber, toWhatsAppNumber } from "@/lib/invite";
+
+/** أصل الروابط الصحيح — نفس المستخدم في لوحة صاحب الدعوة */
+const APP_ORIGIN = appUrl.replace(/\/$/, "");
 
 export default function PublicInvite() {
   const { slug } = useParams();
@@ -193,6 +199,62 @@ export default function PublicInvite() {
                 )}
               </div>
             )}
+
+            {/* رقم التواصل للاستفسارات — يحدده صاحب الدعوة ويحدد وسيلته */}
+            {invite.contactPhone && (
+              <div className="space-y-3 rounded-xl border border-gold/20 bg-gold/5 p-5 font-sans">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gold/10 text-gold-light">
+                    <Phone className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="mb-1 text-sm text-gray-400">للاستفسارات</p>
+                    <p className="text-lg font-medium text-white" dir="ltr">
+                      {toDialNumber(invite.contactPhone)}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(invite.contactMethod === "call" || invite.contactMethod === "both") && (
+                    <a href={"tel:" + toDialNumber(invite.contactPhone)} className="flex-1">
+                      <Button
+                        variant="outline"
+                        className="w-full border-gold/40 bg-transparent text-gold-light hover:bg-gold/10"
+                      >
+                        <Phone className="ml-2 h-4 w-4" /> اتصال
+                      </Button>
+                    </a>
+                  )}
+                  {(invite.contactMethod === "whatsapp" || invite.contactMethod === "both") && (
+                    <a
+                      href={"https://wa.me/" + toWhatsAppNumber(invite.contactPhone)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1"
+                    >
+                      <Button className="w-full bg-green-600 text-white hover:bg-green-700">
+                        <MessageCircle className="ml-2 h-4 w-4" /> واتساب
+                      </Button>
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* QR لرابط الدعوة — يمسحه المدعو فتُفتح الدعوة مباشرة */}
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-black/30 p-5 font-sans">
+              <p className="text-center text-sm text-gray-400">
+                امسح الرمز لفتح الدعوة على جهاز آخر أو لمشاركتها
+              </p>
+              <QrCode
+                value={buildPublicInviteUrl(APP_ORIGIN, invite.shareSlug || slug || "")}
+                size={168}
+                className="p-2"
+              />
+              <p className="break-all text-center text-[11px] text-gray-500" dir="ltr">
+                {buildPublicInviteUrl(APP_ORIGIN, invite.shareSlug || slug || "")}
+              </p>
+            </div>
 
             <div className="pt-8 border-t border-white/10">
               {isSubmitted ? (
