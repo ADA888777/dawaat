@@ -252,17 +252,17 @@ export function ContactImportDialog({
 
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="device" className="gap-1 text-xs">
-              <BookUser className="h-4 w-4" /> جهات الاتصال
+            <TabsTrigger value="device" className="gap-1 px-1 text-[11px] sm:text-xs">
+              <BookUser className="hidden h-4 w-4 sm:inline-block" /> جهات الاتصال
             </TabsTrigger>
-            <TabsTrigger value="vcard" className="gap-1 text-xs">
-              <FileUp className="h-4 w-4" /> ملف
+            <TabsTrigger value="vcard" className="gap-1 px-1 text-[11px] sm:text-xs">
+              <FileUp className="hidden h-4 w-4 sm:inline-block" /> ملف
             </TabsTrigger>
-            <TabsTrigger value="paste" className="gap-1 text-xs">
-              <ClipboardPaste className="h-4 w-4" /> لصق قائمة
+            <TabsTrigger value="paste" className="gap-1 px-1 text-[11px] sm:text-xs">
+              <ClipboardPaste className="hidden h-4 w-4 sm:inline-block" /> لصق قائمة
             </TabsTrigger>
-            <TabsTrigger value="manual" className="gap-1 text-xs">
-              <Keyboard className="h-4 w-4" /> يدوي
+            <TabsTrigger value="manual" className="gap-1 px-1 text-[11px] sm:text-xs">
+              <Keyboard className="hidden h-4 w-4 sm:inline-block" /> يدوي
             </TabsTrigger>
           </TabsList>
 
