@@ -15,6 +15,10 @@ import { useAuth } from "./auth";
 export type EventCategory =
   | "wedding" | "engagement" | "birthday" | "graduation" | "meeting" | "general";
 export type AttendanceStatus = "pending" | "attending" | "maybe" | "declined";
+/** حالة تجهيز/إرسال الدعوة — مستقلة عن رد المدعو */
+export type InviteStatus = "pending" | "prepared" | "sent" | "no_response";
+/** الوسيلة التي يحددها صاحب الدعوة لرقم التواصل */
+export type ContactMethod = "call" | "whatsapp" | "both";
 
 export interface Me {
   id: string;
@@ -50,6 +54,11 @@ export interface EventRecord {
   attendingCount: number;
   declinedCount: number;
   maybeCount: number;
+  sentCount: number;
+  pendingSendCount: number;
+  /** رقم التواصل للاستفسارات — يظهر للمدعو في صفحة الدعوة */
+  contactPhone: string | null;
+  contactMethod: ContactMethod;
 }
 
 export interface Guest {
@@ -58,6 +67,9 @@ export interface Guest {
   name: string;
   phone: string;
   attendanceStatus: AttendanceStatus;
+  /** حالة إرسال الدعوة، لا تُخلط برد المدعو */
+  inviteStatus: InviteStatus;
+  inviteSentAt: string | null;
   /** الرمز الشخصي المستخدم في رابط الدعوة بدل الاسم والجوال */
   inviteToken: string;
 }
@@ -70,6 +82,9 @@ export interface PublicInvitation {
   location: string;
   coverImage: string | null;
   audioFile: string | null;
+  contactPhone: string | null;
+  contactMethod: ContactMethod;
+  shareSlug: string;
 }
 
 // ---------------- صفوف قاعدة البيانات ----------------
@@ -79,12 +94,15 @@ interface EventRow {
   event_date: string; location: string; description: string | null;
   cover_image: string | null; audio_file: string | null;
   template_id: number | null; share_slug: string;
+  contact_phone?: string | null; contact_method?: ContactMethod;
   guests_count?: number; attending_count?: number;
   declined_count?: number; maybe_count?: number;
+  sent_count?: number; pending_send_count?: number;
 }
 interface GuestRow {
   id: number; event_id: number; name: string; phone: string;
   attendance_status: AttendanceStatus; invite_token: string;
+  invite_status?: InviteStatus; invite_sent_at?: string | null;
 }
 interface TemplateRow {
   id: number; name: string; category: EventCategory;
@@ -113,6 +131,10 @@ function mapEvent(row: EventRow): EventRecord {
     attendingCount: row.attending_count ?? 0,
     declinedCount: row.declined_count ?? 0,
     maybeCount: row.maybe_count ?? 0,
+    sentCount: row.sent_count ?? 0,
+    pendingSendCount: row.pending_send_count ?? 0,
+    contactPhone: row.contact_phone ?? null,
+    contactMethod: row.contact_method ?? "both",
   };
 }
 
@@ -123,6 +145,8 @@ function mapGuest(row: GuestRow): Guest {
     name: row.name,
     phone: row.phone,
     attendanceStatus: row.attendance_status,
+    inviteStatus: row.invite_status ?? "pending",
+    inviteSentAt: row.invite_sent_at ?? null,
     inviteToken: row.invite_token,
   };
 }
@@ -291,6 +315,8 @@ export interface EventPayload {
   templateId?: number;
   coverImage?: string;
   audioFile?: string;
+  contactPhone?: string;
+  contactMethod?: ContactMethod;
 }
 
 function eventRow(data: EventPayload) {
@@ -303,6 +329,9 @@ function eventRow(data: EventPayload) {
     template_id: data.templateId ?? null,
     cover_image: data.coverImage ?? null,
     audio_file: data.audioFile ?? null,
+    // رقم فارغ يُخزَّن null حتى لا يظهر زر اتصال بلا رقم
+    contact_phone: normalizePhone(data.contactPhone ?? "") || null,
+    contact_method: data.contactMethod ?? "both",
   };
 }
 
@@ -438,16 +467,48 @@ export function useBulkCreateGuests() {
 export function useUpdateGuest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: { name?: string; phone?: string; attendanceStatus?: AttendanceStatus } }) => {
+    mutationFn: async ({ id, data }: { id: number; data: { name?: string; phone?: string; attendanceStatus?: AttendanceStatus; inviteStatus?: InviteStatus } }) => {
       const row: Record<string, unknown> = {};
       if (data.name !== undefined) row.name = data.name;
       if (data.phone !== undefined) row.phone = data.phone;
       if (data.attendanceStatus !== undefined) row.attendance_status = data.attendanceStatus;
+      if (data.inviteStatus !== undefined) {
+        row.invite_status = data.inviteStatus;
+        if (data.inviteStatus === "sent") row.invite_sent_at = new Date().toISOString();
+      }
       const updated = unwrap<{ event_id: number }>(await supabase.from("guests")
         .update(row).eq("id", id).select("event_id").single());
       return { eventId: updated.event_id };
     },
     onSuccess: (d) => invalidateGuests(qc, d.eventId),
+  });
+}
+
+/**
+ * تسجيل حالة التجهيز/الإرسال لعدة مدعوين في نداء واحد.
+ * الدالة في قاعدة البيانات تتحقق أن المناسبة تخص المستخدم الحالي،
+ * فلا يستطيع أحد تعديل حالة مدعوي مناسبة لا يملكها.
+ */
+export function useMarkInviteStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      guestIds,
+      status,
+    }: {
+      eventId: number;
+      guestIds: number[];
+      status: InviteStatus;
+    }): Promise<{ updated: number }> => {
+      if (guestIds.length === 0) return { updated: 0 };
+      const { data, error } = await supabase.rpc("mark_guests_invite_status", {
+        p_guest_ids: guestIds,
+        p_status: status,
+      });
+      throwIf(error);
+      return { updated: typeof data === "number" ? data : guestIds.length };
+    },
+    onSuccess: (_d, vars) => invalidateGuests(qc, vars.eventId),
   });
 }
 
@@ -545,6 +606,9 @@ export function useGetPublicInvitation(slug: string, opts?: QueryOpts) {
         location: row.location,
         coverImage: row.cover_image,
         audioFile: row.audio_file,
+        contactPhone: row.contact_phone ?? null,
+        contactMethod: (row.contact_method ?? "both") as ContactMethod,
+        shareSlug: row.share_slug ?? slug,
       };
     },
   });
