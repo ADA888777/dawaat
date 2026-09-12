@@ -29,24 +29,26 @@ const linkGroups = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-white/10 bg-ink-soft">
-      <div className="max-w-7xl mx-auto px-4 md:px-8 py-14">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-10">
-          <div className="space-y-3">
-            <div className="text-3xl font-serif text-gold-light font-bold">دعوات</div>
-            <p className="text-gray-400 text-sm leading-relaxed max-w-xs">
-              منصة دعوات إلكترونية فاخرة لمناسباتكم الاستثنائية — تصميم، إدارة حضور، وتأكيد دعوات في مكان واحد.
+    <footer className="bg-ink text-gray-300">
+      <div className="mx-auto max-w-[1120px] px-5 pt-14 md:px-6">
+        <div className="grid grid-cols-1 gap-10 border-b border-white/10 pb-10 sm:grid-cols-2 lg:grid-cols-[1.6fr_1fr_1fr_1fr]">
+          <div className="sm:col-span-2 lg:col-span-1">
+            <span className="text-[28px] font-bold tracking-[0.06em] text-gold-light">دعوات</span>
+            <p className="mt-3.5 max-w-[38ch] text-sm leading-[1.95] text-gray-400">
+              منصة دعوات إلكترونية فاخرة لمناسباتكم الاستثنائية — تصميم، إدارة حضور، وتأكيد دعوات
+              في مكان واحد.
             </p>
           </div>
+
           {linkGroups.map((group) => (
             <div key={group.title}>
-              <h3 className="text-white font-bold mb-4">{group.title}</h3>
-              <ul className="space-y-2.5">
+              <h3 className="mb-4 text-[15px] font-bold text-gold-light">{group.title}</h3>
+              <ul className="flex flex-col gap-2.5">
                 {group.links.map((link) => (
                   <li key={link.href + link.label}>
                     <Link
                       href={link.href}
-                      className="text-gray-400 hover:text-gold-light text-sm transition-colors"
+                      className="text-sm text-gray-400 transition-colors hover:text-gold-light"
                     >
                       {link.label}
                     </Link>
@@ -56,13 +58,14 @@ export function Footer() {
             </div>
           ))}
         </div>
-        <div className="border-t border-white/10 mt-12 pt-6 flex flex-col md:flex-row items-center justify-between gap-3 text-sm text-gray-400">
+
+        <div className="flex flex-col items-center justify-between gap-4 py-5 text-[13px] text-gray-500 md:flex-row">
           <p>جميع الحقوق محفوظة لمنصة دعوات &copy; {new Date().getFullYear()}</p>
-          <div className="flex gap-6">
-            <Link href="/terms" className="hover:text-gold-light transition-colors">الشروط</Link>
-            <Link href="/privacy" className="hover:text-gold-light transition-colors">الخصوصية</Link>
-            <Link href="/help" className="hover:text-gold-light transition-colors">المساعدة</Link>
-          </div>
+          <nav className="flex gap-5">
+            <Link href="/terms" className="transition-colors hover:text-gold-light">الشروط</Link>
+            <Link href="/privacy" className="transition-colors hover:text-gold-light">الخصوصية</Link>
+            <Link href="/help" className="transition-colors hover:text-gold-light">المساعدة</Link>
+          </nav>
         </div>
       </div>
     </footer>
