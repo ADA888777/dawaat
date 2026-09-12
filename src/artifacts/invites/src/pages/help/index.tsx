@@ -81,19 +81,19 @@ export default function HelpPage() {
     >
       {/* دليل الاستخدام */}
       <section className="mb-16">
-        <h2 className="text-2xl font-bold font-serif text-white mb-8">كيف تستخدم المنصة؟</h2>
+        <h2 className="text-2xl font-bold font-serif text-ink mb-8">كيف تستخدم المنصة؟</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {steps.map((step, i) => (
-            <div key={step.title} className="bg-ink-soft border border-white/5 rounded-xl p-6 space-y-3">
+            <div key={step.title} className="bg-cream-2 border border-line rounded-xl p-6 space-y-3">
               <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-full bg-gold/10 flex items-center justify-center text-gold shrink-0">
+                <div className="w-11 h-11 rounded-full bg-beige flex items-center justify-center text-gold-deep shrink-0">
                   <step.icon className="w-5 h-5" />
                 </div>
-                <h3 className="text-lg font-bold text-white">
-                  <span className="text-gold ml-1">{i + 1}.</span> {step.title}
+                <h3 className="text-lg font-bold text-ink">
+                  <span className="text-gold-deep ml-1">{i + 1}.</span> {step.title}
                 </h3>
               </div>
-              <p className="text-gray-400 leading-relaxed">{step.body}</p>
+              <p className="text-gray-600 leading-relaxed">{step.body}</p>
             </div>
           ))}
         </div>
@@ -101,14 +101,14 @@ export default function HelpPage() {
 
       {/* الأسئلة الشائعة */}
       <section id="faq" className="mb-16 scroll-mt-24">
-        <h2 className="text-2xl font-bold font-serif text-white mb-8">الأسئلة الشائعة</h2>
-        <Accordion type="single" collapsible className="bg-ink-soft border border-white/5 rounded-xl px-6">
+        <h2 className="text-2xl font-bold font-serif text-ink mb-8">الأسئلة الشائعة</h2>
+        <Accordion type="single" collapsible className="bg-cream-2 border border-line rounded-xl px-6">
           {faqs.map((faq, i) => (
-            <AccordionItem key={faq.q} value={`faq-${i}`} className="border-white/10">
-              <AccordionTrigger className="text-right text-white hover:text-gold hover:no-underline">
+            <AccordionItem key={faq.q} value={`faq-${i}`} className="border-line">
+              <AccordionTrigger className="text-right text-ink hover:text-gold-deep hover:no-underline">
                 {faq.q}
               </AccordionTrigger>
-              <AccordionContent className="text-gray-400 leading-relaxed">
+              <AccordionContent className="text-gray-600 leading-relaxed">
                 {faq.a}
               </AccordionContent>
             </AccordionItem>
@@ -118,27 +118,27 @@ export default function HelpPage() {
 
       {/* الترقية والدعم */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-ink-soft border border-gold/30 rounded-xl p-6 space-y-3">
-          <div className="w-11 h-11 rounded-full bg-gold/10 flex items-center justify-center text-gold">
+        <div className="bg-cream-2 border border-gold/40 rounded-xl p-6 space-y-3">
+          <div className="w-11 h-11 rounded-full bg-beige flex items-center justify-center text-gold-deep">
             <Crown className="w-5 h-5" />
           </div>
-          <h3 className="text-lg font-bold text-white">تحتاج مناسبات أكثر؟</h3>
-          <p className="text-gray-400 leading-relaxed">
+          <h3 className="text-lg font-bold text-ink">تحتاج مناسبات أكثر؟</h3>
+          <p className="text-gray-600 leading-relaxed">
             رقِّ حسابك إلى الخطة المدفوعة من صفحة الاشتراك في لوحة التحكم واستمتع بعدد غير محدود من المناسبات.
           </p>
-          <Link href={user ? "/subscription" : "/sign-up"} className="inline-block text-gold font-bold hover:underline">
+          <Link href={user ? "/subscription" : "/sign-up"} className="inline-block text-gold-deep font-bold hover:underline">
             {user ? "عرض خطط الاشتراك" : "أنشئ حساباً للبدء"}
           </Link>
         </div>
-        <div className="bg-ink-soft border border-white/5 rounded-xl p-6 space-y-3">
-          <div className="w-11 h-11 rounded-full bg-gold/10 flex items-center justify-center text-gold">
+        <div className="bg-cream-2 border border-line rounded-xl p-6 space-y-3">
+          <div className="w-11 h-11 rounded-full bg-beige flex items-center justify-center text-gold-deep">
             <LifeBuoy className="w-5 h-5" />
           </div>
-          <h3 className="text-lg font-bold text-white">لم تجد إجابتك؟</h3>
-          <p className="text-gray-400 leading-relaxed">
+          <h3 className="text-lg font-bold text-ink">لم تجد إجابتك؟</h3>
+          <p className="text-gray-600 leading-relaxed">
             راسلنا على البريد الإلكتروني وسنرد عليك في أقرب وقت:
           </p>
-          <a href="mailto:support@daawat.app" dir="ltr" className="inline-block text-gold font-bold hover:underline">
+          <a href="mailto:support@daawat.app" dir="ltr" className="inline-block text-gold-deep font-bold hover:underline">
             support@daawat.app
           </a>
         </div>
