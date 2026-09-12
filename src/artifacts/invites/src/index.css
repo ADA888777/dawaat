@@ -9,29 +9,30 @@
    لوحة ألوان العلامة — المصدر الوحيد للحقيقة
    أي تغيير لون في المستقبل يتم من هنا فقط.
 
-   ملاحظة على الأسماء: لوحة العميل تحوي `--border`، وهذا الاسم محجوز
+   ملاحظة على الأسماء: اللوحة تحوي `--border`، وهذا الاسم محجوز
    مسبقاً في هذا المشروع لمتغير shadcn المخزَّن بصيغة HSL منفصلة
    (`hsl(var(--border))`). وضع قيمة hex فيه يكسر كل حدود الواجهة،
    لذا سُمّي هنا `--border-line` وضُبط متغير shadcn على القيمة نفسها
    بصيغة HSL أدناه — النتيجة البصرية متطابقة.
    ===================================================================== */
 :root {
-  --gold: #9B7445;
-  --gold-light: #B99668;
-  --dark: #29251F;
-  --cream: #FAF7F1;
-  --beige: #F2EADF;
-  --text-muted: #7C756B;
+  --gold: #A8815A;
+  --gold-light: #C4A57E;
+  --dark: #2A2622;
+  --cream: #F7F1EA;
+  --cream-2: #FDF9F5;
+  --beige: #F0E6DA;
+  --text-muted: #7A7268;
   --white: #FFFFFF;
-  --border-line: #EEE4D6;
+  --border-line: #E9DECF;
 
-  /* درجات مشتقّة — ليست إضافات تجميلية، كل واحدة تحل مشكلة محددة:
-     gold-deep : الذهبي الأصلي يعطي تبايناً 4.22 على الأبيض، أي أقل من
-                 حد WCAG AA للنص الصغير (4.5). هذه الدرجة الأغمق قليلاً
-                 تحقق 4.81 وتُستخدم للنصوص والروابط الصغيرة فقط.
-     dark-soft : بديل #1A1A1A السابق — سطح البطاقات فوق الخلفية الداكنة. */
-  --gold-deep: #906B40;
-  --dark-soft: #363129;
+  /* درجات مشتقّة — كل واحدة تحل مشكلة محددة:
+     gold-deep : الذهبي الأساسي يعطي تبايناً 3.53 على الأبيض، أي أقل من
+                 حد WCAG AA للنص الصغير (4.5). هذه الدرجة الأغمق تحقق
+                 4.77 وتُستخدم للنصوص والروابط الصغيرة والعناوين الذهبية.
+     dark-soft : سطح البطاقات فوق الخلفية الداكنة. */
+  --gold-deep: #8C6742;
+  --dark-soft: #3A342D;
 }
 
 @theme inline {
@@ -76,23 +77,23 @@
   --color-ink: var(--dark);
   --color-ink-soft: var(--dark-soft);
   --color-cream: var(--cream);
+  --color-cream-2: var(--cream-2);
   --color-beige: var(--beige);
   --color-line: var(--border-line);
 
-  /* إعادة تعريف سلّم الرمادي بدرجات دافئة مشتقّة من اللوحة نفسها.
-     التطبيق يستخدم gray-* في أكثر من 220 موضعاً؛ تغييرها هنا يوحّد
-     المظهر دفعة واحدة بدل تعديل كل موضع على حدة، ويحافظ على ترتيب
-     السطوع فيبقى النص الفاتح فاتحاً على الخلفيات الداكنة. */
-  --color-gray-50:  #FAF7F1;
-  --color-gray-100: #F2EADF;
-  --color-gray-200: #EEE4D6;
-  --color-gray-300: #D5CCBE;
-  --color-gray-400: #B3AA9E;
-  --color-gray-500: #7C756B;
-  --color-gray-600: #6B655C;
-  --color-gray-700: #59534B;
-  --color-gray-800: #443F37;
-  --color-gray-900: #29251F;
+  /* سلّم رمادي دافئ مشتقّ من اللوحة نفسها. التطبيق يستخدم gray-*
+     في أكثر من 220 موضعاً؛ تغييرها هنا يوحّد المظهر دفعة واحدة
+     ويحافظ على ترتيب السطوع. */
+  --color-gray-50: #FDF9F5;
+  --color-gray-100: #F7F1EA;
+  --color-gray-200: #E9DECF;
+  --color-gray-300: #D3C6B3;
+  --color-gray-400: #B0A595;
+  --color-gray-500: #7A7268;
+  --color-gray-600: #6A6359;
+  --color-gray-700: #574F47;
+  --color-gray-800: #423B33;
+  --color-gray-900: #2A2622;
 
   --font-sans: 'Cairo', sans-serif;
   --font-serif: 'Cairo', serif;
@@ -106,74 +107,72 @@
 
 /* LIGHT MODE — مشتق بالكامل من لوحة العلامة أعلاه */
 :root {
-  --background: 0 0% 100%;          /* أبيض */
-  --foreground: 36 14% 14%;         /* dark */
-  --border: 35 41% 89%;             /* border-line #EEE4D6 */
+  --background: 0 0% 100%;        /* أبيض */
+  --foreground: 30 11% 15%;       /* dark #2A2622 */
+  --border: 35 37% 86%;           /* border-line #E9DECF */
   --card: 0 0% 100%;
-  --card-foreground: 36 14% 14%;
-  --card-border: 35 41% 89%;
-  --sidebar: 40 47% 96%;            /* cream */
-  --sidebar-foreground: 36 14% 14%;
-  --sidebar-border: 35 41% 89%;
-  --sidebar-primary: 33 38% 44%;    /* gold */
+  --card-foreground: 30 11% 15%;
+  --card-border: 35 37% 86%;
+  --sidebar: 32 45% 94%;          /* cream #F7F1EA */
+  --sidebar-foreground: 30 11% 15%;
+  --sidebar-border: 35 37% 86%;
+  --sidebar-primary: 30 31% 51%;  /* gold #A8815A */
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 35 42% 91%;     /* beige */
-  --sidebar-accent-foreground: 36 14% 14%;
-  --sidebar-ring: 33 38% 44%;
+  --sidebar-accent: 33 42% 90%;   /* beige #F0E6DA */
+  --sidebar-accent-foreground: 30 11% 15%;
+  --sidebar-ring: 30 31% 51%;
   --popover: 0 0% 100%;
-  --popover-foreground: 36 14% 14%;
-  --popover-border: 35 41% 89%;
-  --primary: 33 38% 44%;            /* gold */
+  --popover-foreground: 30 11% 15%;
+  --popover-border: 35 37% 86%;
+  --primary: 30 31% 51%;          /* gold */
   --primary-foreground: 0 0% 100%;
-  --secondary: 35 42% 91%;          /* beige */
-  --secondary-foreground: 36 14% 14%;
-  --muted: 40 47% 96%;              /* cream */
-  /* text-muted الأصلي يعطي 4.26 على الكريمي — أقل من حد AA للنص الصغير.
-     نستخدم gray-600 المشتق (#6B655C = 5.77) للنصوص الثانوية الصغيرة،
-     ويبقى --text-muted كما هو في اللوحة للعناصر الكبيرة. */
-  --muted-foreground: 36 8% 39%;
-  --accent: 33 38% 44%;             /* gold */
+  --secondary: 33 42% 90%;        /* beige */
+  --secondary-foreground: 30 11% 15%;
+  --muted: 32 45% 94%;            /* cream */
+  /* text-muted الأصلي أقل من حد AA للنص الصغير على الكريمي،
+     لذا نستخدم gray-600 المشتق (#6A6359) للنصوص الثانوية. */
+  --muted-foreground: 35 9% 38%;
+  --accent: 30 31% 51%;           /* gold */
   --accent-foreground: 0 0% 100%;
   --destructive: 0 72% 45%;
   --destructive-foreground: 0 0% 100%;
-  --input: 35 41% 85%;
-  --ring: 33 38% 44%;
+  --input: 35 35% 81%;
+  --ring: 30 31% 51%;
 
   --radius: 0.5rem;
 }
 
 .dark {
-  --background: 36 14% 14%;         /* dark */
-  --foreground: 40 47% 96%;         /* cream */
-  --border: 37 14% 24%;
-  --card: 37 14% 19%;               /* dark-soft */
-  --card-foreground: 40 47% 96%;
-  --card-border: 37 14% 24%;
-  --sidebar: 37 14% 19%;
-  --sidebar-foreground: 40 47% 96%;
-  --sidebar-border: 37 14% 24%;
-  --sidebar-primary: 34 37% 57%;    /* gold-light — الأنسب على الداكن */
-  --sidebar-primary-foreground: 36 14% 14%;
-  --sidebar-accent: 37 14% 24%;
-  --sidebar-accent-foreground: 40 47% 96%;
-  --sidebar-ring: 34 37% 57%;
-  --popover: 37 14% 19%;
-  --popover-foreground: 40 47% 96%;
-  --popover-border: 37 14% 24%;
-  /* على الخلفية الداكنة نستخدم gold-light: الذهبي الأساسي يعطي 3.61
-     فقط فوق --dark بينما gold-light يعطي 5.53 */
-  --primary: 34 37% 57%;
-  --primary-foreground: 36 14% 14%;
-  --secondary: 37 14% 24%;
-  --secondary-foreground: 40 47% 96%;
-  --muted: 37 14% 24%;
-  --muted-foreground: 37 21% 79%;
-  --accent: 34 37% 57%;
-  --accent-foreground: 36 14% 14%;
+  --background: 30 11% 15%;       /* dark */
+  --foreground: 32 45% 94%;       /* cream */
+  --border: 32 13% 26%;
+  --card: 32 13% 20%;             /* dark-soft #3A342D */
+  --card-foreground: 32 45% 94%;
+  --card-border: 32 13% 26%;
+  --sidebar: 32 13% 20%;
+  --sidebar-foreground: 32 45% 94%;
+  --sidebar-border: 32 13% 26%;
+  --sidebar-primary: 33 37% 63%;  /* gold-light — الأنسب على الداكن */
+  --sidebar-primary-foreground: 30 11% 15%;
+  --sidebar-accent: 32 13% 26%;
+  --sidebar-accent-foreground: 32 45% 94%;
+  --sidebar-ring: 33 37% 63%;
+  --popover: 32 13% 20%;
+  --popover-foreground: 32 45% 94%;
+  --popover-border: 32 13% 26%;
+  /* على الخلفية الداكنة نستخدم gold-light لتباين أعلى من الذهبي الأساسي */
+  --primary: 33 37% 63%;
+  --primary-foreground: 30 11% 15%;
+  --secondary: 32 13% 26%;
+  --secondary-foreground: 32 45% 94%;
+  --muted: 32 13% 26%;
+  --muted-foreground: 33 21% 80%;
+  --accent: 33 37% 63%;
+  --accent-foreground: 30 11% 15%;
   --destructive: 0 62% 42%;
   --destructive-foreground: 0 0% 100%;
-  --input: 37 14% 28%;
-  --ring: 34 37% 57%;
+  --input: 32 13% 30%;
+  --ring: 33 37% 63%;
 }
 
 @layer base {
