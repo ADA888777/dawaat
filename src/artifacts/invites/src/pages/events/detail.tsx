@@ -61,7 +61,12 @@ import {
   statusSelectionToUpdate,
   type GuestDisplayStatus,
 } from "@/lib/invite";
-import type { PickedContact } from "@/lib/contact-picker";
+import {
+  ContactImportError,
+  getContactPickerSupport,
+  pickContacts,
+  type PickedContact,
+} from "@/lib/contact-picker";
 
 /**
  * [م-7] الأصل الصحيح لروابط الدعوات.
@@ -85,6 +90,11 @@ export default function EventDetail() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  /** ما يعيده منتقي جهات الاتصال قبل فتح نافذة المراجعة */
+  const [importSeed, setImportSeed] = useState<PickedContact[]>([]);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [isPickingContacts, setIsPickingContacts] = useState(false);
+  const contactSupport = useMemo(() => getContactPickerSupport(), []);
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [guestToDelete, setGuestToDelete] = useState<Guest | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -160,12 +170,58 @@ export default function EventDetail() {
 
   // ────────────────────────── الاستيراد ──────────────────────────
 
+  /**
+   * زر «استيراد من جهات الاتصال».
+   *
+   * على الأجهزة التي تدعم Contact Picker (أندرويد Chrome/Edge) يُفتح منتقي
+   * جهات الاتصال فوراً من داخل معالج الضغط نفسه، لأن المتصفح يشترط تفاعلاً
+   * مباشراً من المستخدم؛ ولو أُجّل النداء إلى ما بعد ظهور النافذة لرفضه.
+   * وبقية الأجهزة تُفتح لها نافذة الطرق البديلة مباشرة بلا رسالة خطأ.
+   */
+  const openImportDialog = async () => {
+    if (!contactSupport.supported) {
+      setImportSeed([]);
+      setImportMessage(null);
+      setIsImportOpen(true);
+      return;
+    }
+
+    setIsPickingContacts(true);
+    try {
+      const picked = await pickContacts();
+      setImportSeed(picked);
+      setImportMessage(
+        picked.length === 0
+          ? "لم تختر أي جهة اتصال — أعد المحاولة أو استخدم طريقة أخرى"
+          : null,
+      );
+    } catch (err) {
+      setImportSeed([]);
+      setImportMessage(
+        err instanceof ContactImportError
+          ? err.message
+          : "تعذر فتح جهات الاتصال. استخدم إحدى الطرق البديلة.",
+      );
+    } finally {
+      setIsPickingContacts(false);
+      setIsImportOpen(true);
+    }
+  };
+
+  /** أرقام المدعوين الحاليين — تُمرَّر للنافذة لكشف المكرر قبل الحفظ */
+  const guestPhones = useMemo(
+    () => (guests ?? []).map((guest) => guest.phone),
+    [guests],
+  );
+
   const handleImport = (contacts: PickedContact[]) => {
     bulkCreateGuests.mutate(
       { eventId, data: { guests: contacts } },
       {
         onSuccess: (res) => {
           setIsImportOpen(false);
+          setImportSeed([]);
+          setImportMessage(null);
           toast({
             title: "تمت إضافة " + res.created + " مدعو",
             description:
@@ -393,10 +449,21 @@ export default function EventDetail() {
                 {selectedIds.length > 0 ? " (" + selectedIds.length + ")" : ""}
               </Button>
               <Button
-                onClick={() => setIsImportOpen(true)}
+                onClick={() => void openImportDialog()}
+                disabled={isPickingContacts}
                 className="bg-gold font-medium text-black hover:bg-gold/90"
+                title={
+                  contactSupport.supported
+                    ? "يفتح جهات اتصال جهازك لاختيار المدعوين"
+                    : "استيراد من ملف جهات الاتصال أو CSV أو لصق قائمة"
+                }
               >
-                <Plus className="ml-2 h-4 w-4" /> استيراد من جهات الاتصال
+                {isPickingContacts ? (
+                  <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="ml-2 h-4 w-4" />
+                )}
+                استيراد من جهات الاتصال
               </Button>
             </div>
           </div>
@@ -675,6 +742,9 @@ export default function EventDetail() {
         onOpenChange={setIsImportOpen}
         maxRows={MAX_IMPORT_ROWS}
         isSaving={bulkCreateGuests.isPending}
+        existingPhones={guestPhones}
+        initialContacts={importSeed}
+        initialMessage={importMessage}
         onImport={handleImport}
       />
 
