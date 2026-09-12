@@ -14,6 +14,8 @@
  *   • أي جهاز: استيراد CSV، أو لصق قائمة أسماء/أرقام، أو الإدخال اليدوي.
  */
 
+import Papa from "papaparse";
+
 export interface PickedContact {
   name: string;
   phone: string;
@@ -159,16 +161,71 @@ export function isValidContactPhone(phone: string): boolean {
   return /^\+?[0-9]{9,15}$/.test(phone);
 }
 
+/**
+ * مفتاح مقارنة موحّد يمنع تكرار المدعو نفسه بصيغتين مختلفتين.
+ * 0501234567 و +966501234567 و 00966501234567 كلها رقم واحد،
+ * لذلك تُقارن آخر تسع خانات — وهي القاعدة التي تستخدمها تطبيقات
+ * المراسلة نفسها لمطابقة جهات الاتصال.
+ */
+export function contactPhoneKey(raw: string): string {
+  const digits = normalizeContactPhone(raw).replace(/^\+/, "");
+  if (!digits) return "";
+  return digits.length > 9 ? digits.slice(-9) : digits;
+}
+
 export function dedupeContacts(list: PickedContact[]): PickedContact[] {
-  const seen = new Set<string>();
+  return mergeContacts([], list);
+}
+
+/**
+ * يدمج دفعة جديدة في قائمة قائمة بلا تكرار.
+ * تُحفظ أول صيغة وصلت للرقم، ويفوز الاسم الأوضح لأن الرقم قد يكون
+ * استُخدم اسماً مؤقتاً في المصدر الأول.
+ */
+export function mergeContacts(
+  base: PickedContact[],
+  incoming: PickedContact[],
+): PickedContact[] {
+  const index = new Map<string, number>();
   const out: PickedContact[] = [];
-  for (const c of list) {
-    const phone = normalizeContactPhone(c.phone);
-    if (!phone || seen.has(phone)) continue;
-    seen.add(phone);
-    out.push({ name: (c.name ?? "").trim().slice(0, 100) || phone, phone });
+
+  for (const entry of [...base, ...incoming]) {
+    const phone = normalizeContactPhone(entry ? entry.phone : "");
+    if (!phone) continue;
+    const key = contactPhoneKey(phone);
+    if (!key) continue;
+
+    const name = String((entry && entry.name) || "").trim().slice(0, 100);
+    const at = index.get(key);
+
+    if (at === undefined) {
+      index.set(key, out.length);
+      out.push({ name: name || phone, phone });
+      continue;
+    }
+
+    const current = out[at];
+    const currentIsPlaceholder = current.name === current.phone;
+    if (name && (currentIsPlaceholder || name.length > current.name.length)) {
+      out[at] = { name, phone: current.phone };
+    }
   }
+
   return out;
+}
+
+/** يفصل الأرقام الموجودة مسبقاً في قائمة المدعوين عن الجديدة */
+export function splitKnownContacts(
+  list: PickedContact[],
+  knownPhones: string[],
+): { fresh: PickedContact[]; known: PickedContact[] } {
+  const known = new Set(knownPhones.map(contactPhoneKey).filter(Boolean));
+  const fresh: PickedContact[] = [];
+  const dup: PickedContact[] = [];
+  for (const contact of list) {
+    (known.has(contactPhoneKey(contact.phone)) ? dup : fresh).push(contact);
+  }
+  return { fresh, known: dup };
 }
 
 // ──────────────────── جهات اتصال الجهاز (أندرويد) ────────────────────
@@ -376,8 +433,216 @@ export function parseContactLines(raw: string): PickedContact[] {
   return dedupeContacts(out);
 }
 
-/** يقرأ ملفاً نصياً بترميز UTF-8 ويزيل علامة BOM إن وُجدت */
+/**
+ * يقرأ ملفاً نصياً ويكتشف ترميزه.
+ * مهم للأسماء العربية: Excel على ويندوز يصدّر CSV بترميز windows-1256،
+ * وقراءته كـ UTF-8 تحوّل الأسماء إلى رموز غير مفهومة.
+ */
 export async function readTextFile(file: File): Promise<string> {
-  const text = await file.text();
-  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+
+  if (bytes.length > 1) {
+    const isUtf16le = bytes[0] === 0xff && bytes[1] === 0xfe;
+    const isUtf16be = bytes[0] === 0xfe && bytes[1] === 0xff;
+    if (isUtf16le || isUtf16be) {
+      return new TextDecoder(isUtf16le ? "utf-16le" : "utf-16be")
+        .decode(bytes)
+        .replace(/^\uFEFF/, "");
+    }
+  }
+
+  const utf8 = new TextDecoder("utf-8").decode(bytes).replace(/^\uFEFF/, "");
+  if (!utf8.includes("\uFFFD")) return utf8;
+
+  try {
+    const arabic = new TextDecoder("windows-1256")
+      .decode(bytes)
+      .replace(/^\uFEFF/, "");
+    if (!arabic.includes("\uFFFD")) return arabic;
+  } catch {
+    // لا ترميز بديل متاح — نُكمل بـ UTF-8
+  }
+
+  return utf8;
+}
+
+// ───────────────── CSV وأي ملف جهات اتصال آخر ─────────────────
+
+export type ContactFileKind = "vcard" | "csv" | "text";
+
+const CSV_NAME_KEYS = [
+  "name", "full name", "fullname", "display name", "displayname",
+  "contact name", "guest", "guest name",
+  "الاسم", "اسم", "الاسم الكامل", "اسم المدعو", "المدعو", "اسم كامل",
+];
+
+const CSV_PHONE_KEYS = [
+  "phone", "phone number", "phonenumber", "mobile", "mobile number",
+  "mobile phone", "primary phone", "tel", "telephone", "cell", "cell phone",
+  "whatsapp", "phone 1 value", "phone1 value",
+  "رقم الجوال", "الجوال", "جوال", "رقم الهاتف", "الهاتف", "هاتف",
+  "الموبايل", "موبايل", "واتساب", "رقم الواتساب", "الرقم", "رقم",
+];
+
+/** "Phone 1 - Value" و "Mobile_Phone" و "  الجوال " تصبح مفاتيح موحّدة */
+function normalizeHeader(key: string): string {
+  return toWesternDigits(String(key || ""))
+    .replace(/^\uFEFF/, "")
+    .replace(/[_\-.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function pickCell(
+  row: Map<string, string>,
+  exactKeys: string[],
+  fuzzy: (key: string) => boolean,
+): string {
+  for (const key of exactKeys) {
+    const value = row.get(key);
+    if (value && value.trim() !== "") return value;
+  }
+  for (const [key, value] of row) {
+    if (value && value.trim() !== "" && fuzzy(key)) return value;
+  }
+  return "";
+}
+
+/** Google Contacts يضع عدة أرقام في خلية واحدة مفصولة بـ ::: */
+function firstUsablePhone(raw: string): string {
+  const parts = String(raw || "").split(/:::|\s*[/|]\s*|\s*,\s*/);
+  for (const part of parts) {
+    const phone = normalizeContactPhone(part);
+    if (isValidContactPhone(phone)) return phone;
+  }
+  return normalizeContactPhone(parts[0] || "");
+}
+
+function rowToContact(raw: Record<string, string>): PickedContact | null {
+  const row = new Map<string, string>();
+  for (const [key, value] of Object.entries(raw || {})) {
+    if (typeof value !== "string") continue;
+    const normalized = normalizeHeader(key);
+    if (normalized && !row.has(normalized)) row.set(normalized, value);
+  }
+
+  const phone = firstUsablePhone(
+    pickCell(
+      row,
+      CSV_PHONE_KEYS,
+      (key) =>
+        /(phone|mobile|tel|cell|whats|جوال|هاتف|موبايل|واتس|رقم)/.test(key) &&
+        !/(type|label|country|code|نوع)/.test(key),
+    ),
+  );
+  if (!isValidContactPhone(phone)) return null;
+
+  let name = pickCell(
+    row,
+    CSV_NAME_KEYS,
+    (key) => /(name|اسم)/.test(key) && !/(file|type|label|user|account|نوع)/.test(key),
+  ).trim();
+
+  // Outlook و iCloud يفصلان الاسم الأول عن العائلة
+  if (!name) {
+    const first = row.get("first name") || row.get("given name") || "";
+    const last =
+      row.get("last name") || row.get("family name") || row.get("surname") || "";
+    name = [first, last].map((part) => part.trim()).filter(Boolean).join(" ");
+  }
+
+  return { name: name || phone, phone };
+}
+
+/**
+ * يقرأ CSV برؤوس أعمدة — يشمل تصديرات Google Contacts و Outlook و iCloud
+ * و Excel العربي. وإن لم يكن للملف رؤوس أعمدة يُقرأ سطراً بسطر بدل رفضه.
+ */
+export function parseCsvContacts(raw: string): PickedContact[] {
+  const text = String(raw || "").replace(/^\uFEFF/, "");
+  if (text.trim() === "") return [];
+
+  let rows: Array<Record<string, string>> = [];
+  try {
+    const result = Papa.parse<Record<string, string>>(text, {
+      header: true,
+      skipEmptyLines: "greedy",
+      transformHeader: (header: string) => String(header || "").trim(),
+    });
+    rows = Array.isArray(result.data) ? result.data : [];
+  } catch {
+    rows = [];
+  }
+
+  const out: PickedContact[] = [];
+  for (const row of rows) {
+    const contact = rowToContact(row);
+    if (contact) out.push(contact);
+  }
+
+  // ملف بلا رؤوس أعمدة مثل: سعود العتيبي,0501234567
+  if (out.length === 0) return parseContactLines(text);
+  return dedupeContacts(out);
+}
+
+/** النوع يُحدَّد من المحتوى أولاً، فالامتداد قد يكون مضللاً أو مفقوداً */
+export function detectContactFileKind(
+  raw: string,
+  fileName = "",
+): ContactFileKind {
+  const text = String(raw || "");
+  const name = String(fileName || "").toLowerCase();
+  if (/BEGIN:VCARD/i.test(text) || /\.(vcf|vcard)$/.test(name)) return "vcard";
+  const firstLine = text.split(/\r?\n/).find((line) => line.trim() !== "") || "";
+  if (/\.csv$/.test(name) || /[,;\t]/.test(firstLine)) return "csv";
+  return "text";
+}
+
+export interface ParsedContactFile {
+  contacts: PickedContact[];
+  kind: ContactFileKind;
+}
+
+/**
+ * مدخل واحد لكل الملفات. يتعرّف على النوع من المحتوى حتى لا يفشل
+ * الاستيراد لأن iPhone صدّر الملف بامتداد غير متوقع.
+ */
+export function parseContactsFromText(
+  raw: string,
+  fileName = "",
+): ParsedContactFile {
+  const text = String(raw || "").replace(/^\uFEFF/, "");
+  const kind = detectContactFileKind(text, fileName);
+  if (kind === "vcard") return { kind, contacts: parseVCards(text) };
+  if (kind === "csv") return { kind, contacts: parseCsvContacts(text) };
+  return { kind, contacts: parseContactLines(text) };
+}
+
+/** يقرأ عدة ملفات دفعة واحدة ويدمجها بلا تكرار */
+export async function parseContactFiles(
+  files: File[],
+): Promise<ParsedContactFile> {
+  let merged: PickedContact[] = [];
+  let kind: ContactFileKind = "text";
+  for (const file of files) {
+    const parsed = parseContactsFromText(await readTextFile(file), file.name);
+    if (parsed.contacts.length > 0) kind = parsed.kind;
+    merged = mergeContacts(merged, parsed.contacts);
+  }
+  return { contacts: merged, kind };
+}
+
+const FILE_ACCEPT_DEFAULT =
+  ".vcf,.vcard,.csv,.txt,text/vcard,text/x-vcard,text/directory,text/csv,text/plain";
+
+/**
+ * قيمة accept الآمنة لكل منصّة.
+ * على iOS تقييد accept يجعل ملفات .vcf تظهر رمادية غير قابلة للاختيار
+ * داخل تطبيق «الملفات»، فيُترك الحقل مفتوحاً ويُتحقق من المحتوى بعد القراءة.
+ */
+export function contactFileAccept(
+  platform: ContactPlatform,
+): string | undefined {
+  return platform === "ios" ? undefined : FILE_ACCEPT_DEFAULT;
 }
