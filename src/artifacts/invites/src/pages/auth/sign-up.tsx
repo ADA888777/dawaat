@@ -25,7 +25,7 @@ export default function SignUpPage() {
     }
     setIsLoading(true);
     const { data, error: authError } = await supabase.auth.signUp({
-      email,
+      email: email.trim(),
       password,
       options: {
         data: { full_name: name.trim() },
@@ -72,18 +72,18 @@ export default function SignUpPage() {
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>
           <Label className="mb-2 block text-sm font-semibold">الاسم الكامل</Label>
-          <Input required value={name} onChange={(e) => setName(e.target.value)}
+          <Input required autoComplete="name" value={name} onChange={(e) => setName(e.target.value)}
             placeholder="مثال: أحمد العلي" className="bg-gray-50 border-gray-200 h-11" />
         </div>
         <div>
           <Label className="mb-2 block text-sm font-semibold">البريد الإلكتروني</Label>
-          <Input type="email" dir="ltr" required value={email}
+          <Input type="email" dir="ltr" inputMode="email" autoComplete="email" required value={email}
             onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com"
             className="bg-gray-50 border-gray-200 h-11" />
         </div>
         <div>
           <Label className="mb-2 block text-sm font-semibold">كلمة المرور</Label>
-          <Input type="password" dir="ltr" required value={password}
+          <Input type="password" dir="ltr" autoComplete="new-password" required value={password}
             onChange={(e) => setPassword(e.target.value)} placeholder="6 أحرف على الأقل"
             className="bg-gray-50 border-gray-200 h-11" />
         </div>
