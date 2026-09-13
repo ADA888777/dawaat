@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Link, useLocation, useParams } from "wouter";
-import { useCreateEvent, useUpdateEvent, useGetEvent, useListTemplates, useGetMe, getGetEventQueryKey } from "@/lib/api";
+import { useCreateEvent, useUpdateEvent, useGetEvent, useListTemplates, useGetMe, getGetEventQueryKey, normalizePhone, isValidPhone } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,6 +14,20 @@ import { Mic, Square, UploadCloud, ChevronRight, Loader2, Play, Pause } from "lu
 import { useUpload } from "@/hooks/use-upload";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+
+/**
+ * قيمة حقل datetime-local بالتوقيت المحلي للجهاز.
+ *
+ * كانت الصفحة تستخدم toISOString() وهو يعيد التوقيت العالمي UTC،
+ * بينما الحقل يتوقع توقيتاً محلياً. النتيجة: كل مرة يُفتح نموذج
+ * التعديل يظهر الموعد متأخراً بمقدار فرق التوقيت (ثلاث ساعات في
+ * السعودية)، ومجرد الحفظ كان يُزحزح موعد المناسبة فعلياً.
+ */
+function toLocalInputValue(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return format(date, "yyyy-MM-dd'T'HH:mm");
+}
 
 const eventSchema = z.object({
   title: z.string().min(1, "عنوان المناسبة مطلوب"),
@@ -27,10 +41,12 @@ const eventSchema = z.object({
     contactPhone: z
       .string()
       .optional()
-      .refine(
-        (value) => !value || /^\+?[0-9\s()-]{9,20}$/.test(value),
-        "رقم غير صالح — مثال: 0501234567",
-      ),
+      // التحقق يجري على الرقم بعد التوحيد، فيقبل الأرقام العربية
+    // ٠٥٠١٢٣٤٥٦٧ والمسافات والأقواس، ويرفض رموزاً بلا أرقام كافية.
+    .refine(
+      (value) => !value || !value.trim() || isValidPhone(normalizePhone(value)),
+      "رقم غير صالح — مثال: 0501234567 أو +966501234567",
+    ),
     contactMethod: z.enum(["call", "whatsapp", "both"]).optional(),
 });
 
@@ -73,7 +89,7 @@ export default function EventForm() {
       form.reset({
         title: eventData.title,
         category: eventData.category,
-        eventDate: new Date(eventData.eventDate).toISOString().slice(0, 16), // datetime-local format
+        eventDate: toLocalInputValue(eventData.eventDate),
         location: eventData.location,
         description: eventData.description,
         templateId: eventData.templateId || undefined,
@@ -210,10 +226,17 @@ export default function EventForm() {
 
   const onSubmit = (data: EventFormValues) => {
     setSubmitError(null);
+    // الحقل يعطي توقيتاً محلياً، وnew Date تقرأه محلياً ثم نحوّله إلى UTC
+    // للتخزين — فتبقى اللحظة نفسها بلا أي انزياح.
+    const parsed = new Date(data.eventDate);
+    if (Number.isNaN(parsed.getTime())) {
+      setSubmitError("التاريخ والوقت غير صالحين");
+      return;
+    }
     const payload = {
       ...data,
       description: data.description || "",
-      eventDate: new Date(data.eventDate).toISOString(),
+      eventDate: parsed.toISOString(),
     };
 
     if (isEditing && eventId) {
@@ -376,7 +399,9 @@ export default function EventForm() {
                           <Input
                             placeholder="0501234567"
                             dir="ltr"
+                            type="tel"
                             inputMode="tel"
+                            autoComplete="tel"
                             className="text-right"
                             {...field}
                             value={field.value ?? ""}
