@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { CalendarPlus, Users, Share2, BellRing, Crown, LifeBuoy } from "lucide-react";
 import { StaticPage } from "@/components/static-page";
 import { useAuth } from "@/lib/auth";
+import { useGetAppSettings } from "@/lib/api";
 import {
   Accordion,
   AccordionContent,
@@ -33,14 +34,17 @@ const steps = [
   },
 ];
 
-const faqs = [
+const buildFaqs = (freeLimit: number) => [
   {
     q: "هل يحتاج ضيوفي إلى حساب لتأكيد الحضور؟",
     a: "لا. صفحة الدعوة عامة، ويكفي أن يفتح الضيف الرابط ويدخل اسمه ورقم جواله لتأكيد حضوره أو اعتذاره.",
   },
   {
     q: "كم عدد المناسبات التي يمكنني إنشاؤها؟",
-    a: "الخطة المجانية تتيح إنشاء حتى 3 مناسبات. للترقية إلى الخطة المدفوعة (مناسبات غير محدودة) توجه إلى صفحة الاشتراك من لوحة التحكم.",
+    a:
+"الباقة المجانية تتيح إنشاء " +
+(freeLimit === 1 ? "مناسبة واحدة" : freeLimit + " مناسبات") +
+". للترقية إلى الباقة الماسية (مناسبات غير محدودة) توجّه إلى صفحة الباقة من لوحة التحكم.",
   },
   {
     q: "هل يمكنني تعديل الدعوة بعد إرسال الرابط؟",
@@ -60,12 +64,19 @@ const faqs = [
   },
   {
     q: "كيف أحذف حسابي وبياناتي؟",
-    a: "يمكنك حذف مناسباتك وضيوفك في أي وقت من لوحة التحكم. ولحذف الحساب نهائياً تواصل معنا وسنقوم بذلك خلال مدة وجيزة.",
+    a: "من صفحة الإعدادات ثم قسم «حذف الحساب». الحذف نهائي ويشمل كل مناسباتك وقوائم المدعوين والردود.",
   },
 ];
 
 export default function HelpPage() {
   const { user } = useAuth();
+  const { data: appSettings } = useGetAppSettings();
+  
+  // بيانات الدعم وحد الباقة المجانية يحرّرهما الأدمن من صفحة الإعدادات
+  const faqs = buildFaqs(appSettings?.freeEventsLimit ?? 1);
+  const supportEmail = (appSettings?.supportEmail ?? "").trim();
+  const supportPhone = (appSettings?.supportPhone ?? "").trim();
+  const whatsapp = (appSettings?.supportWhatsapp || appSettings?.supportPhone || "").replace(/\D/g, "");
 
   // دعم الوصول المباشر إلى قسم الأسئلة الشائعة عبر ‎/help#faq
   useEffect(() => {
@@ -138,9 +149,29 @@ export default function HelpPage() {
           <p className="text-gray-600 leading-relaxed">
             راسلنا على البريد الإلكتروني وسنرد عليك في أقرب وقت:
           </p>
-          <a href="mailto:support@daawat.app" dir="ltr" className="inline-block text-gold-deep font-bold hover:underline">
-            support@daawat.app
-          </a>
+          {supportEmail ? (
+<a href={`mailto:${supportEmail}`} dir="ltr" className="block text-gold-deep font-bold hover:underline">
+{supportEmail}
+</a>
+) : null}
+{supportPhone ? (
+<a href={`tel:${supportPhone}`} dir="ltr" className="block text-gold-deep font-bold hover:underline">
+{supportPhone}
+</a>
+) : null}
+{whatsapp ? (
+<a
+href={`https://wa.me/${whatsapp}`}
+target="_blank"
+rel="noopener noreferrer"
+className="block text-gold-deep font-bold hover:underline"
+>
+تواصل عبر واتساب
+</a>
+) : null}
+{!supportEmail && !supportPhone && !whatsapp ? (
+<p className="text-sm text-gray-500">لم تُضف بيانات التواصل بعد.</p>
+) : null}
         </div>
       </section>
     </StaticPage>
