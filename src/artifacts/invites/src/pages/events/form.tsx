@@ -259,7 +259,7 @@ export default function EventForm() {
             // بينما الحد الحقيقي ثلاث دعوات.
             const limitMatch = msg.match(/EVENTS_LIMIT_REACHED:(\d+)/);
             if (limitMatch) {
-              const limit = Number(limitMatch[1]) || me?.eventsLimit || 3;
+              const limit = Number(limitMatch[1]) || me?.eventsLimit || 1;
               setSubmitError(
                 `لقد وصلت إلى الحد الأقصى لباقتك الحالية (${limit} ${limit === 1 ? "دعوة" : "دعوات"}). ` +
                 `احذف إحدى دعواتك لإنشاء دعوة جديدة، أو قم بالترقية إلى الباقة الماسية.`
