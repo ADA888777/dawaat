@@ -9,6 +9,8 @@ import {
   useBulkCreateGuests,
   useMarkInviteStatus,
   MAX_IMPORT_ROWS,
+  phoneMatchKey,
+  toWesternDigits,
   type Guest,
 } from "@/lib/api";
 import { useParams, Link } from "wouter";
@@ -77,9 +79,17 @@ const APP_ORIGIN = appUrl.replace(/\/$/, "");
 
 export default function EventDetail() {
   const { id } = useParams();
-  const eventId = Number(id);
-  const { data: event, isLoading: isLoadingEvent } = useGetEvent(eventId);
-  const { data: guests, isLoading: isLoadingGuests } = useListGuests(eventId);
+  // رابط مثل /events/abc كان يُنتج NaN فيُرسل استعلاماً فاسداً
+  // إلى قاعدة البيانات بدل إظهار «المناسبة غير موجودة» فوراً.
+  const parsedId = Number(id);
+  const eventId = Number.isInteger(parsedId) && parsedId > 0 ? parsedId : 0;
+  const hasValidId = eventId > 0;
+  const { data: event, isLoading: isLoadingEvent } = useGetEvent(eventId, {
+    query: { enabled: hasValidId },
+  });
+  const { data: guests, isLoading: isLoadingGuests } = useListGuests(eventId, {
+    query: { enabled: hasValidId },
+  });
   const { toast } = useToast();
 
   const updateGuest = useUpdateGuest();
@@ -104,12 +114,23 @@ export default function EventDetail() {
   const [sendIndex, setSendIndex] = useState(0);
   const [openedCurrent, setOpenedCurrent] = useState(false);
 
+  /**
+   * البحث برقم الجوال يطابق كل الصيغ.
+   * سابقاً كان includes نصياً بحتاً، فالبحث عن 0501234567 لا يجد
+   * المدعو المخزَّن بصيغة +966501234567 وهو نفس الشخص.
+   */
   const filteredGuests = useMemo(() => {
-    const q = searchTerm.trim().toLowerCase();
-    if (!q) return guests ?? [];
-    return (guests ?? []).filter(
-      (g) => g.name.toLowerCase().includes(q) || g.phone.includes(q),
-    );
+    const raw = searchTerm.trim();
+    if (!raw) return guests ?? [];
+    const q = toWesternDigits(raw).toLowerCase();
+    const digits = q.replace(/\D/g, "");
+    const key = digits.length >= 6 ? phoneMatchKey(q) : "";
+    return (guests ?? []).filter((g) => {
+      if (g.name.toLowerCase().includes(q)) return true;
+      if (!digits) return false;
+      if (g.phone.includes(digits)) return true;
+      return !!key && phoneMatchKey(g.phone).includes(key);
+    });
   }, [guests, searchTerm]);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -297,11 +318,14 @@ export default function EventDetail() {
       toast({ title: "اختر مدعوّاً واحداً على الأقل" });
       return;
     }
-    markInviteStatus.mutate({
-      eventId,
-      guestIds: selectedGuests.map((g) => g.id),
-      status: "prepared",
-    });
+    markInviteStatus.mutate(
+      {
+        eventId,
+        guestIds: selectedGuests.map((g) => g.id),
+        status: "prepared",
+      },
+      { onError: () => toast({ title: "تعذر تسجيل حالة التجهيز", variant: "destructive" }) },
+    );
     setSendQueue(selectedGuests);
     setSendIndex(0);
     setOpenedCurrent(false);
