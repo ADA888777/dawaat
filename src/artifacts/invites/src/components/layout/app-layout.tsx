@@ -1,8 +1,8 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useGetMe } from "@/lib/api";
+import { useGetMe, useGetAppSettings } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Home, Calendar, CreditCard, Shield, LogOut, Menu, X, Loader2 } from "lucide-react";
+import { Home, Calendar, CreditCard, Shield, Settings, LogOut, Menu, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface AppLayoutProps {
@@ -13,15 +13,26 @@ export function AppLayout({ children }: AppLayoutProps) {
   const [location] = useLocation();
   const { signOut } = useAuth();
   const { data: user, isLoading } = useGetMe();
+const { data: settings } = useGetAppSettings();
+const siteName = settings?.siteName || "دعوات";
+
+// اسم الموقع قابل للتغيير من إعدادات الأدمن، فيتبعه عنوان التبويب أيضاً
+useEffect(() => {
+if (siteName) document.title = siteName;
+}, [siteName]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const navigation =
     user?.role === "admin"
-      ? [{ name: "لوحة التحكم", href: "/admin", icon: Shield }]
+      ? [
+{ name: "لوحة التحكم", href: "/admin", icon: Shield },
+{ name: "الإعدادات", href: "/settings", icon: Settings },
+]
       : [
           { name: "الرئيسية", href: "/dashboard", icon: Home },
           { name: "دعواتي", href: "/events", icon: Calendar },
           { name: "الباقة", href: "/subscription", icon: CreditCard },
+          { name: "الإعدادات", href: "/settings", icon: Settings },
         ];
 
   const handleSignOut = async () => {
@@ -33,7 +44,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans">
       {/* Mobile Header */}
       <div className="md:hidden bg-ink text-white p-4 flex items-center justify-between z-20">
-        <span className="text-2xl font-serif text-gold font-bold">دعوات</span>
+        <span className="text-2xl font-serif text-gold font-bold">{siteName}</span>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
           {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>
@@ -46,7 +57,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         } fixed md:static inset-y-0 right-0 w-64 bg-ink text-gray-300 transition-transform duration-200 ease-in-out z-10 flex flex-col`}
       >
         <div className="p-6 hidden md:block">
-          <h1 className="text-4xl font-serif text-gold font-bold tracking-wider">دعوات</h1>
+          <h1 className="text-4xl font-serif text-gold font-bold tracking-wider">{siteName}</h1>
         </div>
 
         <div className="px-6 pb-6 pt-20 md:pt-0">
