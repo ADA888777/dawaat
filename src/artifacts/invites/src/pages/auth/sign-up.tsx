@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Loader2, MailCheck } from "lucide-react";
+import { Loader2, MailCheck, Lock } from "lucide-react";
+import { useGetAppSettings } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import { AuthShell } from "./auth-shell";
 
 export default function SignUpPage() {
   const [, setLocation] = useLocation();
+  const { data: appSettings } = useGetAppSettings();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,6 +23,10 @@ export default function SignUpPage() {
     setError(null);
     if (password.length < 6) {
       setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل");
+      return;
+    }
+    if (appSettings && !appSettings.signupsEnabled) {
+      setError("إنشاء الحسابات الجديدة متوقف حالياً");
       return;
     }
     setIsLoading(true);
@@ -47,6 +53,46 @@ export default function SignUpPage() {
       setNeedsConfirmation(true);
     }
   };
+
+  // التسجيل مغلق من إعدادات الأدمن: نخفي النموذج ونشرح السبب
+
+  // بدل ترك المستخدم يحاول ثم يواجه خطأ غير مفهوم.
+
+  if (appSettings && !appSettings.signupsEnabled) {
+
+    return (
+
+      <AuthShell title="التسجيل مغلق مؤقتاً" subtitle="نعود قريباً">
+
+        <div className="text-center space-y-4">
+
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto text-gray-500">
+
+            <Lock className="w-8 h-8" />
+
+          </div>
+
+          <p className="text-gray-600 leading-relaxed">
+
+            إنشاء الحسابات الجديدة متوقف حالياً. إذا كان لديك حساب فيمكنك الدخول كالمعتاد.
+
+          </p>
+
+          <Link href="/sign-in" className="text-gold-deep font-bold hover:underline block">
+
+            تسجيل الدخول
+
+          </Link>
+
+        </div>
+
+      </AuthShell>
+
+    );
+
+  }
+
+  
 
   if (needsConfirmation) {
     return (
