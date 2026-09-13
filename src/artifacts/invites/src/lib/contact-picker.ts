@@ -530,14 +530,15 @@ function pickCell(
   return "";
 }
 
-/** Google Contacts يضع عدة أرقام في خلية واحدة مفصولة بـ ::: */
+/**
+ * Google Contacts وOutlook يضعان عدة أرقام في خلية واحدة مفصولة بـ ::: .
+ * تُطبَّق هنا نفس قاعدة تفضيل الجوال على الهاتف الثابت.
+ */
 function firstUsablePhone(raw: string): string {
   const parts = String(raw || "").split(/:::|\s*[/|]\s*|\s*,\s*/);
-  for (const part of parts) {
-    const phone = normalizeContactPhone(part);
-    if (isValidContactPhone(phone)) return phone;
-  }
-  return normalizeContactPhone(parts[0] || "");
+  return preferMobileNumber(
+    parts.map((part) => normalizeContactPhone(part)).filter(Boolean),
+  );
 }
 
 function rowToContact(raw: Record<string, string>): PickedContact | null {
