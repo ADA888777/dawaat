@@ -538,18 +538,31 @@ function rowToContact(raw: Record<string, string>): PickedContact | null {
   );
   if (!isValidContactPhone(phone)) return null;
 
-  let name = pickCell(
-    row,
-    CSV_NAME_KEYS,
-    (key) => /(name|اسم)/.test(key) && !/(file|type|label|user|account|نوع)/.test(key),
-  ).trim();
+  // ① عمود اسم كامل صريح
+  let name = pickCell(row, CSV_NAME_KEYS, () => false).trim();
 
-  // Outlook و iCloud يفصلان الاسم الأول عن العائلة
+  // ② Google و Outlook و iCloud تفصل الاسم الأول عن العائلة،
+  //    والدمج هنا مقدَّم على أي عمود فيه كلمة name حتى لا يُكتفى بالاسم الأول
   if (!name) {
     const first = row.get("first name") || row.get("given name") || "";
+    const middle = row.get("middle name") || "";
     const last =
       row.get("last name") || row.get("family name") || row.get("surname") || "";
-    name = [first, last].map((part) => part.trim()).filter(Boolean).join(" ");
+    name = [first, middle, last]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  // ③ أي عمود آخر يشبه الاسم
+  if (!name) {
+    name = pickCell(
+      row,
+      [],
+      (key) =>
+        /(name|اسم)/.test(key) &&
+        !/(file|type|label|user|account|نوع)/.test(key),
+    ).trim();
   }
 
   return { name: name || phone, phone };
