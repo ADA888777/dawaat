@@ -1,4 +1,92 @@
-undefined
+import { useEffect, useMemo, useState } from "react";
+import {
+  ShieldCheck,
+  Users,
+  CreditCard,
+  Palette,
+  Mail,
+  Bell,
+  Globe,
+  ScrollText,
+  BarChart3,
+  LogOut,
+  Loader2,
+  Plus,
+  Trash2,
+  Search,
+  FileText,
+} from "lucide-react";
+import { format } from "date-fns";
+import { ar } from "date-fns/locale";
+import { AppLayout } from "@/components/layout/app-layout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
+import {
+  useAdminSetFreeLimit,
+  useAdminSetPlan,
+  useCreateTemplate,
+  useDeleteTemplate,
+  useGetAdminStats,
+  useGetAppSettings,
+  useListAdminEvents,
+  useListAdminUsers,
+  useListTemplates,
+  useUpdateAdminUser,
+  useUpdateAppSettings,
+  useUpdateMyProfile,
+  useUpdateTemplate,
+  type AdminUser,
+  type AppSettings,
+  type ContactMethod,
+  type EventCategory,
+  type Me,
+} from "@/lib/api";
+import {
+  AccountSecurityCard,
+  FieldRow,
+  SaveBar,
+  SelectInput,
+  SettingsCard,
+  ToggleRow,
+} from "./parts";
+
+const ROLE_OPTIONS = [
+  { value: "user", label: "مستخدم" },
+  { value: "admin", label: "أدمن" },
+];
+
+const PLAN_OPTIONS = [
+  { value: "free", label: "المجانية" },
+  { value: "paid", label: "الماسية" },
+];
+
+const CONTACT_METHOD_OPTIONS = [
+  { value: "both", label: "اتصال وواتساب" },
+  { value: "whatsapp", label: "واتساب فقط" },
+  { value: "call", label: "اتصال فقط" },
+];
+
+const CATEGORY_OPTIONS = [
+  { value: "wedding", label: "زفاف" },
+  { value: "engagement", label: "خطوبة" },
+  { value: "birthday", label: "عيد ميلاد" },
+  { value: "graduation", label: "تخرج" },
+  { value: "meeting", label: "اجتماع" },
+  { value: "general", label: "عام" },
+];
+
+const WEEK = 7 * 24 * 3600 * 1000;
+
+function formatDay(value: string | null | undefined): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "—" : format(parsed, "dd MMMM yyyy", { locale: ar });
+}
+
 interface UserDraft {
   role: "user" | "admin";
   plan: "free" | "paid";
