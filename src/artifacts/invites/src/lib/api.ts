@@ -28,6 +28,15 @@ export interface Me {
   plan: "free" | "paid";
   eventsLimit: number | null;
   createdAt: string;
+  /** تفضيلات الحساب — تُدار من صفحة الإعدادات */
+  notifyRsvp: boolean;
+  notifyReminders: boolean;
+  reminder24h: boolean;
+  reminder3h: boolean;
+  defaultContactPhone: string;
+  defaultContactMethod: ContactMethod;
+  defaultTemplateId: number | null;
+  defaultInviteNote: string;
 }
 
 export interface Template {
@@ -111,6 +120,10 @@ interface TemplateRow {
 interface ProfileRow {
   id: string; name: string; email: string; role: "user" | "admin";
   plan: "free" | "paid"; events_limit: number | null; created_at: string;
+notify_rsvp?: boolean; notify_reminders?: boolean;
+reminder_24h?: boolean; reminder_3h?: boolean;
+default_contact_phone?: string | null; default_contact_method?: ContactMethod;
+default_template_id?: number | null; default_invite_note?: string | null;
 }
 
 // ---------------- تحويل الصفوف ----------------
@@ -262,6 +275,14 @@ export function useGetMe() {
         plan: data.plan,
         eventsLimit: data.events_limit,
         createdAt: data.created_at,
+        notifyRsvp: data.notify_rsvp ?? true,
+        notifyReminders: data.notify_reminders ?? true,
+        reminder24h: data.reminder_24h ?? true,
+        reminder3h: data.reminder_3h ?? true,
+        defaultContactPhone: data.default_contact_phone ?? "",
+        defaultContactMethod: data.default_contact_method ?? "both",
+        defaultTemplateId: data.default_template_id ?? null,
+        defaultInviteNote: data.default_invite_note ?? "",
       };
     },
   });
@@ -630,20 +651,26 @@ export interface EventNotification {
 /** [م-2] مشتقّة أيضاً من نفس الاستعلام — بلا رحلة شبكة إضافية. */
 export function useListNotifications() {
   const { user } = useAuth();
+  // تفضيلات التذكير تُقرأ من الحساب: إيقافها من صفحة الإعدادات يُفرغ القائمة فعلياً
+  const { data: me } = useGetMe();
+  const remindersOn = me?.notifyReminders ?? true;
+  const want24h = me?.reminder24h ?? true;
+  const want3h = me?.reminder3h ?? true;
   return useQuery({
     queryKey: getListEventsQueryKey(),
     enabled: !!user,
     queryFn: () => fetchMyEvents(user!.id),
     select: (events): EventNotification[] => {
+      if (!remindersOn) return [];
       const now = Date.now();
       const out: EventNotification[] = [];
       for (const e of events) {
         const diff = new Date(e.eventDate).getTime() - now;
         if (diff <= 0) continue;
         if (diff <= 3 * 3600_000) {
-          out.push({ reminderType: "3h", eventTitle: e.title, eventDate: e.eventDate });
+          if (want3h) out.push({ reminderType: "3h", eventTitle: e.title, eventDate: e.eventDate });
         } else if (diff <= 24 * 3600_000) {
-          out.push({ reminderType: "24h", eventTitle: e.title, eventDate: e.eventDate });
+          if (want24h) out.push({ reminderType: "24h", eventTitle: e.title, eventDate: e.eventDate });
         }
       }
       return out;
@@ -859,6 +886,9 @@ export interface AdminStats {
   paidPlanCount: number;
   eventsCount: number;
   templatesCount: number;
+  adminsCount: number;
+  guestsCount: number;
+  attendingCount: number;
 }
 
 export function useGetAdminStats(opts?: QueryOpts) {
@@ -867,21 +897,275 @@ export function useGetAdminStats(opts?: QueryOpts) {
     enabled: opts?.query?.enabled ?? true,
     queryFn: async (): Promise<AdminStats> => {
       // [م-3] head:true يعدّ على الخادم ولا ينقل أي صف.
-      // سابقاً كانت تسحب كل صفوف profiles إلى المتصفح لعرض رقمين.
-      const [users, paid, events, templates] = await Promise.all([
+      const [users, paid, admins, events, templates, guests, attending] = await Promise.all([
         supabase.from("profiles").select("id", { count: "exact", head: true }),
         supabase.from("profiles").select("id", { count: "exact", head: true }).eq("plan", "paid"),
+        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "admin"),
         supabase.from("events").select("id", { count: "exact", head: true }),
         supabase.from("templates").select("id", { count: "exact", head: true }),
+        supabase.from("guests").select("id", { count: "exact", head: true }),
+        supabase.from("guests").select("id", { count: "exact", head: true }).eq("attendance_status", "attending"),
       ]);
-      throwIf(users.error); throwIf(paid.error);
+      throwIf(users.error); throwIf(paid.error); throwIf(admins.error);
       throwIf(events.error); throwIf(templates.error);
+      throwIf(guests.error); throwIf(attending.error);
       return {
         usersCount: users.count ?? 0,
         paidPlanCount: paid.count ?? 0,
+        adminsCount: admins.count ?? 0,
         eventsCount: events.count ?? 0,
         templatesCount: templates.count ?? 0,
+        guestsCount: guests.count ?? 0,
+        attendingCount: attending.count ?? 0,
       };
+    },
+  });
+}
+
+// ---------------- إعدادات الحساب الشخصي ----------------
+export interface ProfilePrefsPayload {
+  name?: string;
+  notifyRsvp?: boolean;
+  notifyReminders?: boolean;
+  reminder24h?: boolean;
+  reminder3h?: boolean;
+  defaultContactPhone?: string;
+  defaultContactMethod?: ContactMethod;
+  defaultTemplateId?: number | null;
+  defaultInviteNote?: string;
+}
+
+/**
+ * تحديث بيانات الحساب وتفضيلاته.
+ * أعمدة الدور والباقة والحد محميّة بتريجر في قاعدة البيانات، فلا يستطيع
+ * المستخدم ترقية نفسه أو منح نفسه صلاحية أدمن من هذا المسار.
+ */
+export function useUpdateMyProfile() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: ProfilePrefsPayload) => {
+      const row: Record<string, unknown> = {};
+      if (data.name !== undefined) {
+        const name = data.name.trim();
+        if (name.length < 2) throw new Error("الاسم قصير جداً");
+        row.name = name.slice(0, 80);
+      }
+      if (data.notifyRsvp !== undefined) row.notify_rsvp = data.notifyRsvp;
+      if (data.notifyReminders !== undefined) row.notify_reminders = data.notifyReminders;
+      if (data.reminder24h !== undefined) row.reminder_24h = data.reminder24h;
+      if (data.reminder3h !== undefined) row.reminder_3h = data.reminder3h;
+      if (data.defaultContactPhone !== undefined) {
+        const phone = normalizePhone(data.defaultContactPhone);
+        if (phone && !isValidPhone(phone)) {
+          throw new Error("رقم التواصل غير صالح. مثال: 0501234567");
+        }
+        row.default_contact_phone = phone || null;
+      }
+      if (data.defaultContactMethod !== undefined) row.default_contact_method = data.defaultContactMethod;
+      if (data.defaultTemplateId !== undefined) row.default_template_id = data.defaultTemplateId;
+      if (data.defaultInviteNote !== undefined) {
+        row.default_invite_note = data.defaultInviteNote.trim().slice(0, 500) || null;
+      }
+      if (Object.keys(row).length === 0) return;
+      row.updated_at = new Date().toISOString();
+      const { error } = await supabase.from("profiles").update(row).eq("id", user!.id);
+      throwIf(error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: getGetMeQueryKey() });
+      qc.invalidateQueries({ queryKey: getListAdminUsersQueryKey() });
+    },
+  });
+}
+
+/**
+ * حذف الحساب نهائياً.
+ * التنفيذ في دالة قاعدة بيانات تتحقق من هوية الطالب، وتحذف صف
+ * المستخدم فتتسلسل الحذف إلى المناسبات والمدعوين. لا يمكن حذف حساب أدمن
+ * من هنا حتى لا يُفقد الموقع آخر حساب إداري بالخطأ.
+ */
+export function useDeleteMyAccount() {
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc("delete_my_account");
+      if (error) {
+        if (error.message.includes("ADMIN_SELF_DELETE_BLOCKED")) {
+          throw new Error("لا يمكن حذف حساب أدمن من صفحة الإعدادات");
+        }
+        throw new Error(error.message);
+      }
+    },
+  });
+}
+
+// ---------------- إعدادات الموقع العامة (أدمن) ----------------
+export interface AppSettings {
+  siteName: string;
+  supportEmail: string;
+  supportPhone: string;
+  supportWhatsapp: string;
+  maintenanceMode: boolean;
+  maintenanceMessage: string;
+  signupsEnabled: boolean;
+  freeEventsLimit: number;
+  paidPlanPrice: number;
+  paidPlanMonths: number;
+  inviteFooterNote: string;
+  inviteDefaultContactMethod: ContactMethod;
+  inviteShowContact: boolean;
+  notifyAdminOnNewUser: boolean;
+  notifyAdminOnNewEvent: boolean;
+  notifyUsersReminders: boolean;
+  termsText: string;
+  privacyText: string;
+  refundText: string;
+  contentPolicyText: string;
+}
+
+const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
+  siteName: "site_name",
+  supportEmail: "support_email",
+  supportPhone: "support_phone",
+  supportWhatsapp: "support_whatsapp",
+  maintenanceMode: "maintenance_mode",
+  maintenanceMessage: "maintenance_message",
+  signupsEnabled: "signups_enabled",
+  freeEventsLimit: "free_events_limit",
+  paidPlanPrice: "paid_plan_price",
+  paidPlanMonths: "paid_plan_months",
+  inviteFooterNote: "invite_footer_note",
+  inviteDefaultContactMethod: "invite_default_contact_method",
+  inviteShowContact: "invite_show_contact",
+  notifyAdminOnNewUser: "notify_admin_on_new_user",
+  notifyAdminOnNewEvent: "notify_admin_on_new_event",
+  notifyUsersReminders: "notify_users_reminders",
+  termsText: "terms_text",
+  privacyText: "privacy_text",
+  refundText: "refund_text",
+  contentPolicyText: "content_policy_text",
+};
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  siteName: "دعوات",
+  supportEmail: "",
+  supportPhone: "",
+  supportWhatsapp: "",
+  maintenanceMode: false,
+  maintenanceMessage: "",
+  signupsEnabled: true,
+  freeEventsLimit: 1,
+  paidPlanPrice: 299,
+  paidPlanMonths: 12,
+  inviteFooterNote: "",
+  inviteDefaultContactMethod: "both",
+  inviteShowContact: true,
+  notifyAdminOnNewUser: true,
+  notifyAdminOnNewEvent: false,
+  notifyUsersReminders: true,
+  termsText: "",
+  privacyText: "",
+  refundText: "",
+  contentPolicyText: "",
+};
+
+export const getGetAppSettingsQueryKey = () => ["app-settings"] as const;
+
+/**
+ * إعدادات الموقع — صف واحد يقرأه الجميع (اسم الموقع وبيانات الدعم
+ * وصيغة الصيانة تظهر للزائر أيضاً) ولا يحدّثه إلا الأدمن بسياسة RLS.
+ * تعذّر القراءة يرجع القيم الافتراضية بدل إسقاط الصفحة.
+ */
+export function useGetAppSettings() {
+  return useQuery({
+    queryKey: getGetAppSettingsQueryKey(),
+    staleTime: 300_000,
+    retry: 1,
+    queryFn: async (): Promise<AppSettings> => {
+      const { data, error } = await supabase
+        .from("app_settings").select("*").limit(1).maybeSingle();
+      if (error || !data) return DEFAULT_APP_SETTINGS;
+      const raw = data as Record<string, unknown>;
+      const out: Record<string, unknown> = { ...DEFAULT_APP_SETTINGS };
+      for (const key of Object.keys(APP_SETTINGS_COLUMNS) as (keyof AppSettings)[]) {
+        const value = raw[APP_SETTINGS_COLUMNS[key]];
+        if (value === null || value === undefined) continue;
+        const fallback = DEFAULT_APP_SETTINGS[key];
+        if (typeof fallback === "boolean") out[key] = Boolean(value);
+        else if (typeof fallback === "number") out[key] = Number(value);
+        else out[key] = String(value);
+      }
+      if (!String(out.siteName ?? "").trim()) out.siteName = DEFAULT_APP_SETTINGS.siteName;
+      return out as unknown as AppSettings;
+    },
+  });
+}
+
+export function useUpdateAppSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: Partial<AppSettings>) => {
+      const row: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(data)) {
+        const column = APP_SETTINGS_COLUMNS[key as keyof AppSettings];
+        if (!column || value === undefined) continue;
+        row[column] = typeof value === "string" ? value.slice(0, 20000) : value;
+      }
+      if (Object.keys(row).length === 0) return;
+      row.updated_at = new Date().toISOString();
+      const { error } = await supabase.from("app_settings").update(row).eq("id", true);
+      throwIf(error);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: getGetAppSettingsQueryKey() }),
+  });
+}
+
+/**
+ * تغيير باقة مستخدم من لوحة الأدمن.
+ * تمر عبر دالة admin_set_plan لأنها الوحيدة المصرّح لها بلمس أعمدة
+ * الباقة، وهي تتحقق من صلاحية الأدمن داخل قاعدة البيانات وتضبط
+ * تاريخ البداية والنهاية معاً.
+ */
+export function useAdminSetPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, plan, months }: { userId: string; plan: "free" | "paid"; months: number }) => {
+      const { error } = await supabase.rpc("admin_set_plan", {
+        p_user_id: userId,
+        p_plan: plan,
+        p_months: Math.max(1, Math.min(120, Math.round(months))),
+      });
+      throwIf(error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: getListAdminUsersQueryKey() });
+      qc.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
+      qc.invalidateQueries({ queryKey: getGetMeQueryKey() });
+    },
+  });
+}
+
+/**
+ * حد المناسبات للباقة المجانية.
+ * الدالة في قاعدة البيانات تحدّث الإعدادات وقيمة العمود الافتراضية
+ * للحسابات الجديدة، واختيارياً تطبّق الحد على الحسابات المجانية القائمة،
+ * وترجع عدد الحسابات التي تأثّرت فعلاً.
+ */
+export function useAdminSetFreeLimit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ limit, applyExisting }: { limit: number; applyExisting: boolean }): Promise<number> => {
+      const { data, error } = await supabase.rpc("admin_set_free_limit", {
+        p_limit: Math.max(0, Math.min(1000, Math.round(limit))),
+        p_apply_existing: applyExisting,
+      });
+      throwIf(error);
+      return typeof data === "number" ? data : 0;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: getGetAppSettingsQueryKey() });
+      qc.invalidateQueries({ queryKey: getListAdminUsersQueryKey() });
+      qc.invalidateQueries({ queryKey: getGetMeQueryKey() });
     },
   });
 }
