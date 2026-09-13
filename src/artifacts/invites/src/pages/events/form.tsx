@@ -83,6 +83,8 @@ export default function EventForm() {
   });
 
   const initializedRef = useRef(false);
+
+  const defaultsAppliedRef = useRef(false);
   useEffect(() => {
     if (eventData && !initializedRef.current) {
       initializedRef.current = true;
@@ -100,6 +102,28 @@ export default function EventForm() {
       });
     }
   }, [eventData, form]);
+  
+  /**
+   * إعدادات الدعوات الافتراضية من صفحة الإعدادات.
+   * تُطبَّق على الدعوة الجديدة فقط، ولا تلمس حقلاً كتبه المستخدم،
+   * وعند التعديل تبقى بيانات المناسبة المحفوظة كما هي.
+   */
+  useEffect(() => {
+    if (isEditing || !me || defaultsAppliedRef.current) return;
+    defaultsAppliedRef.current = true;
+    if (me.defaultContactPhone && !form.getValues("contactPhone")) {
+      form.setValue("contactPhone", me.defaultContactPhone);
+    }
+    if (me.defaultContactMethod) {
+      form.setValue("contactMethod", me.defaultContactMethod);
+    }
+    if (me.defaultTemplateId && !form.getValues("templateId")) {
+      form.setValue("templateId", me.defaultTemplateId);
+    }
+    if (me.defaultInviteNote && !form.getValues("description")) {
+      form.setValue("description", me.defaultInviteNote);
+    }
+  }, [isEditing, me, form]);
 
   const [isRecording, setIsRecording] = useState(false);
   const [isFinalizingRecording, setIsFinalizingRecording] = useState(false);
