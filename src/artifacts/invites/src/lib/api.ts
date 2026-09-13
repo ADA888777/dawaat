@@ -182,11 +182,49 @@ type QueryOpts = { query?: { enabled?: boolean; queryKey?: readonly unknown[] } 
 /** [م-8] سقف الاستيراد الجماعي في العملية الواحدة */
 export const MAX_IMPORT_ROWS = 1000;
 
-/** توحيد صيغة الجوال: أرقام فقط مع الإبقاء على + الدولية */
+/**
+ * خريطة الأرقام الشرقية (العربية والفارسية) إلى الغربية.
+ * لوحة المفاتيح العربية على iPhone وAndroid تكتب ٠١٢…، وكانت
+ * replace(/\D/g) تحذفها بالكامل فيصبح الرقم فارغاً و«غير صالح».
+ */
+const EASTERN_DIGITS: Record<string, string> = {
+  "\u0660": "0", "\u0661": "1", "\u0662": "2", "\u0663": "3", "\u0664": "4",
+  "\u0665": "5", "\u0666": "6", "\u0667": "7", "\u0668": "8", "\u0669": "9",
+  "\u06F0": "0", "\u06F1": "1", "\u06F2": "2", "\u06F3": "3", "\u06F4": "4",
+  "\u06F5": "5", "\u06F6": "6", "\u06F7": "7", "\u06F8": "8", "\u06F9": "9",
+};
+
+/** يحوّل أي أرقام شرقية في النص إلى أرقام غربية */
+export function toWesternDigits(raw: string): string {
+  return String(raw ?? "").replace(
+    /[\u0660-\u0669\u06F0-\u06F9]/g,
+    (d) => EASTERN_DIGITS[d] ?? d,
+  );
+}
+
+/**
+ * توحيد صيغة الجوال — صيغة واحدة في كل المنصة.
+ * - الأرقام الشرقية تُحوَّل إلى غربية.
+ * - البادئة الدولية 00 تُحوَّل إلى + حتى لا يتجاوز الرقم 15 خانة
+ *   ولا يُخزَّن نفس الشخص مرتين بصيغتين مختلفتين.
+ */
 export function normalizePhone(raw: string): string {
-  const trimmed = raw.trim();
-  const plus = trimmed.startsWith("+") ? "+" : "";
-  return plus + trimmed.replace(/\D/g, "");
+  const trimmed = toWesternDigits(raw).trim();
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return "";
+  if (trimmed.startsWith("+")) return "+" + digits;
+  if (digits.startsWith("00")) return "+" + digits.slice(2);
+  return digits;
+}
+
+/**
+ * مفتاح مطابقة واحد لكل رقم: آخر تسع خانات.
+ * بهذا يُعتبر 0501234567 و+966501234567 و00966501234567 شخصاً واحداً،
+ * وهي نفس القاعدة التي تستخدمها تطبيقات المراسلة.
+ */
+export function phoneMatchKey(raw: string): string {
+  const digits = normalizePhone(raw).replace(/\D/g, "");
+  return digits.length > 9 ? digits.slice(-9) : digits;
 }
 
 /** نفس التحقق المطبّق في قاعدة البيانات — رفض مبكر برسالة أوضح */
@@ -244,6 +282,7 @@ export function useListTemplates(params?: { includeInactive?: boolean }) {
 }
 
 export function useCreateTemplate() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ data }: { data: { name: string; category: EventCategory; previewImage: string; active: boolean } }) => {
       const { error } = await supabase.from("templates").insert({
@@ -252,10 +291,16 @@ export function useCreateTemplate() {
       });
       throwIf(error);
     },
+    // القائمة تُقرأ بمفتاحين (مع/بدون المعطّلة) — إبطال بالبادئة يغطيهما
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["templates"] });
+      qc.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
+    },
   });
 }
 
 export function useUpdateTemplate() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, data }: { id: number; data: { name: string; category: EventCategory; previewImage: string; active: boolean } }) => {
       const { error } = await supabase.from("templates").update({
@@ -264,14 +309,20 @@ export function useUpdateTemplate() {
       }).eq("id", id);
       throwIf(error);
     },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["templates"] }),
   });
 }
 
 export function useDeleteTemplate() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id }: { id: number }) => {
       const { error } = await supabase.from("templates").delete().eq("id", id);
       throwIf(error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["templates"] });
+      qc.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
     },
   });
 }
@@ -469,8 +520,20 @@ export function useUpdateGuest() {
   return useMutation({
     mutationFn: async ({ id, data }: { id: number; data: { name?: string; phone?: string; attendanceStatus?: AttendanceStatus; inviteStatus?: InviteStatus } }) => {
       const row: Record<string, unknown> = {};
-      if (data.name !== undefined) row.name = data.name;
-      if (data.phone !== undefined) row.phone = data.phone;
+      if (data.name !== undefined) {
+        const name = data.name.trim();
+        if (!name) throw new Error("اسم المدعو مطلوب");
+        row.name = name.slice(0, 100);
+      }
+      // الرقم يُوحَّد ويُتحقَّق منه هنا أيضاً، وإلا رفضه قيد قاعدة
+      // البيانات برسالة Postgres خام لا يفهمها المستخدم.
+      if (data.phone !== undefined) {
+        const phone = normalizePhone(data.phone);
+        if (!isValidPhone(phone)) {
+          throw new Error("رقم الجوال غير صالح. مثال: 0501234567");
+        }
+        row.phone = phone;
+      }
       if (data.attendanceStatus !== undefined) row.attendance_status = data.attendanceStatus;
       if (data.inviteStatus !== undefined) {
         row.invite_status = data.inviteStatus;
@@ -736,6 +799,7 @@ export function useListAdminUsers() {
 }
 
 export function useUpdateAdminUser() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, data }: { id: string; data: { role?: "user" | "admin"; plan?: "free" | "paid" } }) => {
       const row: Record<string, unknown> = {};
@@ -746,6 +810,13 @@ export function useUpdateAdminUser() {
       }
       const { error } = await supabase.from("profiles").update(row).eq("id", id);
       throwIf(error);
+    },
+    // بدون هذا يبقى عدّاد «الاشتراكات المدفوعة» على قيمته القديمة
+    // حتى يُحدِّث الأدمن الصفحة يدوياً.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: getListAdminUsersQueryKey() });
+      qc.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
+      qc.invalidateQueries({ queryKey: getGetMeQueryKey() });
     },
   });
 }
@@ -764,10 +835,16 @@ export function useListAdminEvents() {
 }
 
 export function useDeleteAdminEvent() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id }: { id: number }) => {
       const { error } = await supabase.from("events").delete().eq("id", id);
       throwIf(error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: getListAdminEventsQueryKey() });
+      qc.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
+      qc.invalidateQueries({ queryKey: getListEventsQueryKey() });
     },
   });
 }
