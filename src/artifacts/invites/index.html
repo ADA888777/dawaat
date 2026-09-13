@@ -34,11 +34,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <!-- [أداء] كان يُحمّل Inter بينما التطبيق يستخدم Cairo المستورد في index.css.
          خط كامل كان يُنزَّل بلا استخدام. -->
+        <!-- [أمان] كان هنا onload مضمّن، وهو سكربت داخل الصفحة يمنع
+         تطبيق Content-Security-Policy صارمة. رابط تنسيق عادي يؤدي
+         نفس الغرض بلا أي جافاسكربت مضمّن. خط Cairo مستورد أيضاً في
+         index.css فالمتصفح يستفيد من نفس الطلب. -->
     <link
-      rel="preload"
-      as="style"
+      rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap"
-      onload="this.onload=null;this.rel='stylesheet'"
     >
   </head>
   <body>
