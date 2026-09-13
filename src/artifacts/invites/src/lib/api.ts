@@ -28,6 +28,8 @@ export interface Me {
   plan: "free" | "paid";
   eventsLimit: number | null;
   createdAt: string;
+  planStartDate: string | null;
+  planEndDate: string | null;
   /** تفضيلات الحساب — تُدار من صفحة الإعدادات */
   notifyRsvp: boolean;
   notifyReminders: boolean;
@@ -124,6 +126,7 @@ notify_rsvp?: boolean; notify_reminders?: boolean;
 reminder_24h?: boolean; reminder_3h?: boolean;
 default_contact_phone?: string | null; default_contact_method?: ContactMethod;
 default_template_id?: number | null; default_invite_note?: string | null;
+plan_start_date?: string | null; plan_end_date?: string | null;
 }
 
 // ---------------- تحويل الصفوف ----------------
@@ -275,6 +278,8 @@ export function useGetMe() {
         plan: data.plan,
         eventsLimit: data.events_limit,
         createdAt: data.created_at,
+        planStartDate: data.plan_start_date ?? null,
+        planEndDate: data.plan_end_date ?? null,
         notifyRsvp: data.notify_rsvp ?? true,
         notifyReminders: data.notify_reminders ?? true,
         reminder24h: data.reminder_24h ?? true,
@@ -643,9 +648,11 @@ export function useGetDashboardSummary() {
 }
 
 export interface EventNotification {
-  reminderType: "24h" | "3h";
+  /** rsvp = تنبيه ردود المدعوين، وليس تذكيراً زمنياً */
+  reminderType: "24h" | "3h" | "rsvp";
   eventTitle: string;
   eventDate: string;
+  pendingCount?: number;
 }
 
 /** [م-2] مشتقّة أيضاً من نفس الاستعلام — بلا رحلة شبكة إضافية. */
@@ -656,21 +663,36 @@ export function useListNotifications() {
   const remindersOn = me?.notifyReminders ?? true;
   const want24h = me?.reminder24h ?? true;
   const want3h = me?.reminder3h ?? true;
+  const wantRsvp = me?.notifyRsvp ?? true;
   return useQuery({
     queryKey: getListEventsQueryKey(),
     enabled: !!user,
     queryFn: () => fetchMyEvents(user!.id),
     select: (events): EventNotification[] => {
-      if (!remindersOn) return [];
       const now = Date.now();
       const out: EventNotification[] = [];
-      for (const e of events) {
+      for (const e of remindersOn ? events : []) {
         const diff = new Date(e.eventDate).getTime() - now;
         if (diff <= 0) continue;
         if (diff <= 3 * 3600_000) {
           if (want3h) out.push({ reminderType: "3h", eventTitle: e.title, eventDate: e.eventDate });
         } else if (diff <= 24 * 3600_000) {
           if (want24h) out.push({ reminderType: "24h", eventTitle: e.title, eventDate: e.eventDate });
+        }
+      }
+      if (wantRsvp) {
+        for (const e of events) {
+          if (new Date(e.eventDate).getTime() - now <= 0) continue;
+          const answered = e.attendingCount + e.declinedCount + e.maybeCount;
+          const pending = e.guestsCount - answered;
+          if (pending > 0) {
+            out.push({
+              reminderType: "rsvp",
+              eventTitle: e.title,
+              eventDate: e.eventDate,
+              pendingCount: pending,
+            });
+          }
         }
       }
       return out;
