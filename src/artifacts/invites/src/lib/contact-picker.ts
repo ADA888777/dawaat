@@ -111,7 +111,7 @@ export function getContactPickerSupport(): ContactPickerSupport {
   if (!getContactsManager()) {
     const reason =
       platform === "ios"
-        ? "متصفح iPhone/iPad لا يسمح لأي موقع بقراءة جهات الاتصال. الطريقة العملية على الآيفون: شارِك جهات الاتصال كملف ‎.vcf‎ واستوردها من التبويب المجاور."
+        ? "متصفح iPhone/iPad لا يسمح لأي موقع بقراءة جهات الاتصال. الطريقة العملية على الآيفون: شارِك جهات الاتصال كملف ‎.vcf‎ واستوردها من تبويب «ملف»."
         : platform === "desktop"
           ? "متصفحات الكمبيوتر لا تدعم الوصول لجهات الاتصال. استورد ملف CSV أو ‎.vcf‎، أو الصق القائمة، أو أضف الرقم يدوياً."
           : "متصفحك لا يدعم فتح جهات الاتصال. استخدم أحد البدائل بالأسفل.";
@@ -159,6 +159,25 @@ export function normalizeContactPhone(raw: string): string {
 /** نفس تحقق قاعدة البيانات — رفض مبكر برسالة أوضح */
 export function isValidContactPhone(phone: string): boolean {
   return /^\+?[0-9]{9,15}$/.test(phone);
+}
+
+/**
+ * Contact Picker API لا تُرفق نوع الرقم، فقد تعيد جهة اتصال أرقاماً عدة
+ * بينها هاتف ثابت. نُفضّل ما يشبه الجوال في السعودية والخليج (الجزء الوطني
+ * تسع خانات تبدأ بـ 5)، وإن لم يوجد نُبقي ترتيب المتصفح كما هو.
+ */
+export function looksLikeMobileNumber(phone: string): boolean {
+  const digits = normalizeContactPhone(phone).replace(/^\+/, "");
+  const national =
+    digits.length > 9 ? digits.slice(-9) : digits.replace(/^0+/, "");
+  return /^5\d{8}$/.test(national);
+}
+
+/** يختار أفضل رقم من عدة أرقام لجهة اتصال واحدة */
+export function preferMobileNumber(numbers: string[]): string {
+  const valid = numbers.filter(isValidContactPhone);
+  const pool = valid.length > 0 ? valid : numbers;
+  return pool.find(looksLikeMobileNumber) ?? pool[0] ?? "";
 }
 
 /**
@@ -305,7 +324,7 @@ export async function pickContacts(): Promise<PickedContact[]> {
     const numbers = (entry.tel ?? [])
       .map((t) => normalizeContactPhone(t))
       .filter((t) => t !== "");
-    const phone = numbers.find(isValidContactPhone) ?? numbers[0] ?? "";
+    const phone = preferMobileNumber(numbers);
     if (!phone) continue;
     mapped.push({ name: rawName.trim() || phone, phone });
   }
@@ -390,6 +409,8 @@ export function parseVCards(raw: string): PickedContact[] {
         if (/CELL|MOBILE|IPHONE/.test(params)) score += 3;
         if (/PREF/.test(params)) score += 1;
         if (/FAX|PAGER/.test(params)) score -= 5;
+      // ترجيح إضافي عند غياب وسم النوع تماماً
+      if (looksLikeMobileNumber(phone)) score += 2;
         tels.push({ value: phone, score });
       }
     }
