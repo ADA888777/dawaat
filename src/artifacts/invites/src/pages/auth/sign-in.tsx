@@ -38,7 +38,7 @@ export default function SignInPage() {
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>
           <Label className="mb-2 block text-sm font-semibold">البريد الإلكتروني</Label>
-          <Input type="email" dir="ltr" required value={email}
+          <Input type="email" dir="ltr" inputMode="email" autoComplete="email" required value={email}
             onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com"
             className="bg-gray-50 border-gray-200 h-11" />
         </div>
@@ -49,7 +49,7 @@ export default function SignInPage() {
               نسيت كلمة المرور؟
             </Link>
           </div>
-          <Input type="password" dir="ltr" required value={password}
+          <Input type="password" dir="ltr" autoComplete="current-password" required value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="bg-gray-50 border-gray-200 h-11" />
         </div>
