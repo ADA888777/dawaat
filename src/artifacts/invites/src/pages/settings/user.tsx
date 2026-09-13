@@ -1,4 +1,59 @@
-undefined
+import { useEffect, useState } from "react";
+import { Link } from "wouter";
+import {
+  User,
+  Bell,
+  Crown,
+  Phone,
+  FileText,
+  LogOut,
+  Trash2,
+  Loader2,
+  AlertTriangle,
+} from "lucide-react";
+import { format } from "date-fns";
+import { ar } from "date-fns/locale";
+import { AppLayout } from "@/components/layout/app-layout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
+import {
+  useDeleteMyAccount,
+  useGetDashboardSummary,
+  useListTemplates,
+  useUpdateMyProfile,
+  type ContactMethod,
+  type Me,
+} from "@/lib/api";
+import {
+  AccountSecurityCard,
+  FieldRow,
+  SaveBar,
+  SelectInput,
+  SettingsCard,
+  ToggleRow,
+} from "./parts";
+
+const CONTACT_METHOD_OPTIONS = [
+  { value: "both", label: "اتصال وواتساب" },
+  { value: "whatsapp", label: "واتساب فقط" },
+  { value: "call", label: "اتصال فقط" },
+];
+
+/** تاريخ غير صالح في قاعدة البيانات لا يجب أن يُسقط الصفحة */
+function safeDate(value: string | null): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDay(value: string | null): string {
+  const parsed = safeDate(value);
+  return parsed ? format(parsed, "dd MMMM yyyy", { locale: ar }) : "—";
+}
+
 /**
  * إعدادات المستخدم العادي.
  * لا يحتوي هذا الملف أي خيار إداري: التوجيه في index يمنع تحميله
