@@ -660,7 +660,11 @@ export function useListNotifications() {
   const { user } = useAuth();
   // تفضيلات التذكير تُقرأ من الحساب: إيقافها من صفحة الإعدادات يُفرغ القائمة فعلياً
   const { data: me } = useGetMe();
-  const remindersOn = me?.notifyReminders ?? true;
+  // المفتاح العام في إعدادات الموقع يعلو على تفضيل المستخدم:
+  // إذا أوقف الأدمن التذكيرات لا تظهر لأحد.
+  const { data: appSettings } = useGetAppSettings();
+  const remindersOn =
+    (me?.notifyReminders ?? true) && (appSettings?.notifyUsersReminders ?? true);
   const want24h = me?.reminder24h ?? true;
   const want3h = me?.reminder3h ?? true;
   const wantRsvp = me?.notifyRsvp ?? true;
