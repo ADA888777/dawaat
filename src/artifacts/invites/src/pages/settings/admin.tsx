@@ -614,7 +614,11 @@ export default function AdminSettings({ me }: { me: Me }) {
             checked={form.inviteShowContact}
             onCheckedChange={(value) => setField("inviteShowContact", value)}
           />
-          <FieldRow label="طريقة التواصل الافتراضية" htmlFor="invite-method">
+          <FieldRow
+            label="الوسائل المسموح إظهارها للمدعو"
+            htmlFor="invite-method"
+            hint="سياسة عامة تعلو على اختيار صاحب الدعوة: لو حددت واتساب فقط لن يظهر زر الاتصال في أي دعوة."
+          >
             <SelectInput
               id="invite-method"
               value={form.inviteDefaultContactMethod}
