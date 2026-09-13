@@ -808,7 +808,10 @@ export function useUpdateAdminUser() {
       if (data.role !== undefined) row.role = data.role;
       if (data.plan !== undefined) {
         row.plan = data.plan;
-        row.events_limit = data.plan === "paid" ? null : 3;
+        // 1 هو القيمة الافتراضية لعمود events_limit في قاعدة البيانات.
+        // كان الرقم 3 هنا، فإرجاع مستخدم إلى الباقة المجانية كان يمنحه
+        // ثلاث مناسبات بدل واحدة دون أن يقصد الأدمن ذلك.
+        row.events_limit = data.plan === "paid" ? null : 1;
       }
       const { error } = await supabase.from("profiles").update(row).eq("id", id);
       throwIf(error);
