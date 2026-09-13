@@ -6,6 +6,7 @@ import {
   useSubmitRsvp,
   useGetGuestByToken,
   useSubmitRsvpByToken,
+useGetAppSettings,
 } from "@/lib/api";
 import { Loader2, Music, MapPin, Calendar as CalendarIcon, Check, PartyPopper, X, Phone, MessageCircle } from "lucide-react";
 import { format } from "date-fns";
@@ -50,6 +51,9 @@ export default function PublicInvite() {
   const { data: tokenGuest, isLoading: isLoadingGuest } = useGetGuestByToken(inviteToken);
   const submitRsvp = useSubmitRsvp();
   const submitByToken = useSubmitRsvpByToken();
+  // إعدادات الموقع تُقرأ للزائر أيضاً: نص أسفل الدعوة، واسم الموقع،
+  // وسياسة الوسائل المسموح إظهارها للمدعو.
+  const { data: appSettings } = useGetAppSettings();
 
   // المدعو مُعرَّف فقط إذا نجح تحويل الرمز إلى صف حقيقي في قاعدة البيانات
   const isPreidentified = !!inviteToken && !!tokenGuest;
@@ -107,6 +111,38 @@ export default function PublicInvite() {
       </div>
     );
   }
+
+  // سياسة الموقع تحدّ ما يظهر للمدعو: إذا سمح الأدمن بواتساب فقط
+
+  // فلن يظهر زر الاتصال حتى لو اختار صاحب الدعوة الوسيلتين.
+
+  const sitePolicy = appSettings?.inviteDefaultContactMethod ?? "both";
+
+  const showContact = appSettings?.inviteShowContact ?? true;
+
+  const ownerMethod = invite.contactMethod || "both";
+
+  const allowCall =
+
+    showContact &&
+
+    (ownerMethod === "call" || ownerMethod === "both") &&
+
+    (sitePolicy === "call" || sitePolicy === "both");
+
+  const allowWhatsapp =
+
+    showContact &&
+
+    (ownerMethod === "whatsapp" || ownerMethod === "both") &&
+
+    (sitePolicy === "whatsapp" || sitePolicy === "both");
+
+  const footerNote = (appSettings?.inviteFooterNote ?? "").trim();
+
+  const siteName = appSettings?.siteName || "دعوات";
+
+  
 
   return (
     <div className="min-h-screen bg-ink text-white flex flex-col font-serif relative overflow-hidden">
@@ -217,7 +253,7 @@ export default function PublicInvite() {
             )}
 
             {/* رقم التواصل للاستفسارات — يحدده صاحب الدعوة ويحدد وسيلته */}
-            {invite.contactPhone && (
+            {invite.contactPhone && (allowCall || allowWhatsapp) && (
               <div className="space-y-3 rounded-xl border border-gold/20 bg-gold/5 p-5 font-sans">
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gold/10 text-gold-light">
@@ -231,7 +267,7 @@ export default function PublicInvite() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {(invite.contactMethod === "call" || invite.contactMethod === "both") && (
+                  {allowCall && (
                     <a href={"tel:" + toDialNumber(invite.contactPhone)} className="flex-1">
                       <Button
                         variant="outline"
@@ -241,7 +277,7 @@ export default function PublicInvite() {
                       </Button>
                     </a>
                   )}
-                  {(invite.contactMethod === "whatsapp" || invite.contactMethod === "both") && (
+                  {allowWhatsapp && (
                     <a
                       href={"https://wa.me/" + toWhatsAppNumber(invite.contactPhone)}
                       target="_blank"
@@ -392,9 +428,14 @@ export default function PublicInvite() {
             </div>
           </div>
           
-          <div className="mt-12 text-center text-xs text-gray-400 font-sans border-t border-white/5 pt-6">
-            صُنع بحب عبر منصة <span className="text-gold-light font-serif">دعوات</span>
-          </div>
+          <div className="mt-12 space-y-3 border-t border-white/5 pt-6 text-center font-sans text-xs text-gray-400">
+{footerNote ? (
+<p className="whitespace-pre-line leading-relaxed text-gray-300">{footerNote}</p>
+) : null}
+<p>
+صُنع بحب عبر منصة <span className="text-gold-light font-serif">{siteName}</span>
+</p>
+</div>
 
         </div>
       </main>
