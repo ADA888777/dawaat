@@ -21,6 +21,22 @@ import { buildPublicInviteUrl, toDialNumber, toWhatsAppNumber } from "@/lib/invi
 /** أصل الروابط الصحيح — نفس المستخدم في لوحة صاحب الدعوة */
 const APP_ORIGIN = appUrl.replace(/\/$/, "");
 
+/**
+ * تنسيق آمن للتاريخ.
+ * format() من date-fns ترمي RangeError على تاريخ غير صالح، وهذا
+ * يقع داخل الرندر فتتحول صفحة الدعوة كلها إلى شاشة بيضاء عند
+ * المدعو. هنا نعيد نصاً فارغاً بدل إسقاط الصفحة.
+ */
+function safeFormat(value: string, pattern: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    return format(date, pattern, { locale: ar });
+  } catch {
+    return "";
+  }
+}
+
 export default function PublicInvite() {
   const { slug } = useParams();
 
@@ -58,7 +74,7 @@ export default function PublicInvite() {
   };
 
   // [ح-2] المدعو المُعرَّف: الرد بالرمز وحده — بلا اسم ولا جوال في الطلب
-  const handleQuickRsvp = (s: 'attending' | 'declined') => {
+  const handleQuickRsvp = (s: 'attending' | 'maybe' | 'declined') => {
     if (!inviteToken) return;
     setFormError(null);
     submitByToken.mutate(
@@ -155,8 +171,8 @@ export default function PublicInvite() {
                 </div>
                 <div>
                   <p className="text-sm text-gray-400 mb-1">الزمان</p>
-                  <p className="font-medium text-lg">{format(new Date(invite.eventDate), 'EEEE، dd MMMM yyyy', { locale: ar })}</p>
-                  <p className="text-gold-light">{format(new Date(invite.eventDate), 'hh:mm a', { locale: ar })}</p>
+                  <p className="font-medium text-lg">{safeFormat(invite.eventDate, 'EEEE، dd MMMM yyyy')}</p>
+                  <p className="text-gold-light">{safeFormat(invite.eventDate, 'hh:mm a')}</p>
                 </div>
               </div>
 
@@ -292,6 +308,15 @@ export default function PublicInvite() {
                       <span className="text-red-300 text-xs">لن أتمكن من الحضور</span>
                     </button>
                   </div>
+                {/* «ربما» كان متاحاً في النموذج العام فقط، فالمدعو الذي
+                    يفتح رابطه الشخصي لم يجد إلا نعم أو لا. */}
+                <button
+                  onClick={() => handleQuickRsvp('maybe')}
+                  disabled={isSending}
+                  className="w-full rounded-2xl border border-orange-500/30 bg-orange-900/20 px-4 py-3 text-sm font-medium text-orange-200 transition-colors hover:bg-orange-900/40 disabled:opacity-50"
+                >
+                  ربما — لم أحدد بعد
+                </button>
                   {isSending && (
                     <div className="flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-gold-light" /></div>
                   )}
@@ -310,6 +335,7 @@ export default function PublicInvite() {
                         <Input 
                           value={name} 
                           onChange={e => setName(e.target.value)} 
+                          autoComplete="name"
                           className="bg-black/50 border-white/10 text-white focus:border-gold h-12"
                           placeholder="الاسم الثلاثي"
                           required
@@ -322,6 +348,9 @@ export default function PublicInvite() {
                           onChange={e => setPhone(e.target.value)} 
                           className="bg-black/50 border-white/10 text-white focus:border-gold h-12 text-right"
                           placeholder="05XXXXXXXX"
+                          type="tel"
+                          inputMode="tel"
+                          autoComplete="tel"
                           dir="ltr"
                           required
                         />
