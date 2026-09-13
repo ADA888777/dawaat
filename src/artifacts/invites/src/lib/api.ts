@@ -735,7 +735,9 @@ export function useSubmitRsvp() {
       if (!isValidPhone(phone)) throw new Error("رقم الجوال غير صالح");
 
       const { error } = await supabase.rpc("submit_rsvp", {
-        p_slug: slug, p_name: name, p_phone: phone, p_status: data.attendanceStatus,
+        // قاعدة البيانات تحدّ الاسم بـ120 حرفاً؛ نقصّه هنا حتى لا يرى
+        // المدعو رسالة قيد خام من Postgres.
+        p_slug: slug, p_name: name.slice(0, 100), p_phone: phone, p_status: data.attendanceStatus,
       });
       throwIf(error);
     },
