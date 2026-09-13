@@ -1,6 +1,6 @@
 import { AppLayout } from "@/components/layout/app-layout";
 import { useToast } from "@/hooks/use-toast";
-import { useUpgradeSubscription, useGetMe, useGetDashboardSummary } from "@/lib/api";
+import { useUpgradeSubscription, useGetMe, useGetDashboardSummary, useGetAppSettings } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Check, Star, Loader2, Crown, Sparkles, MessageCircle, Users, Calendar, Upload, Music, Image, BarChart3, Palette } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -26,13 +26,22 @@ const PRO_EXTRAS = [
 export default function SubscriptionPage() {
   const { data: user, isLoading } = useGetMe();
   const { data: summary } = useGetDashboardSummary();
+const { data: appSettings } = useGetAppSettings();
   const upgradeSub = useUpgradeSubscription();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const isPro = user?.plan === "paid";
   const usedEvents = summary?.eventsCount ?? 0;
-  const limit = user?.eventsLimit ?? 1;   // الباقة المجانية = مناسبة واحدة
+  const limit = user?.eventsLimit ?? appSettings?.freeEventsLimit ?? 1;
+const paidPrice = appSettings?.paidPlanPrice ?? 299;
+const paidMonths = appSettings?.paidPlanMonths ?? 12;
+const periodLabel =
+  paidMonths === 12
+    ? "ريال / سنة"
+    : paidMonths === 1
+      ? "ريال / شهر"
+      : "ريال / " + paidMonths + " شهر";   // الباقة المجانية = مناسبة واحدة
 
   /**
    * بوابة الدفع غير جاهزة بعد.
@@ -149,8 +158,8 @@ export default function SubscriptionPage() {
             <h3 className="text-2xl font-bold text-gold mb-1 font-serif">الماسية</h3>
             <p className="text-gray-400 text-sm mb-5">كل شيء في المجانية، ويزيد</p>
             <div className="mb-6">
-              <span className="text-4xl font-bold text-white">299</span>
-              <span className="text-gray-400 text-sm mr-2">ريال / سنة</span>
+              <span className="text-4xl font-bold text-white">{paidPrice}</span>
+              <span className="text-gray-400 text-sm mr-2">{periodLabel}</span>
             </div>
             <ul className="space-y-3 mb-8 flex-1">
               <li className="flex items-center gap-3 text-gray-300 text-sm font-medium pb-2 border-b border-white/10">
