@@ -1,4 +1,5 @@
 import { StaticPage } from "@/components/static-page";
+import { useGetAppSettings } from "@/lib/api";
 
 const sections = [
   {
@@ -32,6 +33,20 @@ const sections = [
 ];
 
 export default function ContentPolicyPage() {
+  const { data: appSettings } = useGetAppSettings();
+  // نص محرَّر من إعدادات الأدمن يستبدل النص الجاهز؛ الحقل الفارغ يعني الاعتماد عليه.
+  const custom = (appSettings?.contentPolicyText ?? "").trim();
+
+  if (custom) {
+    return (
+      <StaticPage title="سياسة المحتوى والاستخدام المقبول" subtitle="آخر تحديث: يوليو 2026 — القواعد التي تحكم المحتوى والسلوك المقبولين على منصة دعوات.">
+        <div className="bg-cream-2 border border-line rounded-xl p-6 md:p-8 text-gray-700 leading-loose whitespace-pre-line">
+          {custom}
+        </div>
+      </StaticPage>
+    );
+  }
+
   return (
     <StaticPage
       title="سياسة المحتوى والاستخدام المقبول"
