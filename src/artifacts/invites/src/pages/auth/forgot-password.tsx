@@ -25,7 +25,7 @@ export default function ForgotPasswordPage() {
     const base = (import.meta.env.BASE_URL as string).replace(/\/$/, "");
     const redirectTo = `${APP_URL}${base}/reset-password`;
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo,
     });
 
@@ -72,6 +72,8 @@ export default function ForgotPasswordPage() {
             <Input
               type="email"
               dir="ltr"
+              inputMode="email"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
