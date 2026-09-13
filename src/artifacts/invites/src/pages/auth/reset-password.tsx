@@ -32,35 +32,61 @@ export default function ResetPasswordPage() {
   );
 
   useEffect(() => {
-    // التحقق الفوري: هل يوجد recovery token في الـ URL hash؟
+    let cancelled = false;
+
+    /**
+     * ترتيب التحقق مهم.
+     *
+     * عميل Supabase يُنشأ عند تحميل الحزمة مع detectSessionInUrl،
+     * فيقرأ الرمز من الرابط وينظّف العنوان قبل أن يعمل هذا الأثر.
+     * لذلك كان الفحص القديم لا يجد شيئاً في location.hash فيعلن
+     * «الرابط غير صالح» حتى والرابط سليم. كما أن Supabase قد يستخدم
+     * صيغة PKCE التي تضع code في query لا في hash.
+     *
+     * الحل: اسأل الجلسة أولاً، ثم انتظر الحدث إن وُجد أثر للرمز.
+     */
+    const search = window.location.search;
     const hash = window.location.hash;
-    const hasToken =
-      hash.includes("access_token=") || hash.includes("type=recovery");
+    const hasRecoveryHint =
+      hash.includes("access_token=") ||
+      hash.includes("type=recovery") ||
+      /[?&](code|token_hash|token)=/.test(search) ||
+      search.includes("type=recovery");
 
-    if (!hasToken) {
-      // لا يوجد token → الرابط مفتوح مباشرة أو منتهٍ
-      setSessionState("invalid");
-      return;
-    }
-
-    // يوجد token → ننتظر حدث PASSWORD_RECOVERY من Supabase
-    // مهلة 8 ثوانٍ للأجهزة البطيئة
-    const timeout = setTimeout(() => {
-      setSessionState((s) => (s === "waiting" ? "invalid" : s));
-    }, 8000);
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "PASSWORD_RECOVERY" && session) {
-        clearTimeout(timeout);
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled || !session) return;
+      if (
+        event === "PASSWORD_RECOVERY" ||
+        event === "SIGNED_IN" ||
+        event === "TOKEN_REFRESHED" ||
+        event === "INITIAL_SESSION"
+      ) {
         setSessionState("ready");
       }
     });
 
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      if (data.session) {
+        setSessionState("ready");
+        return;
+      }
+      if (!hasRecoveryHint) {
+        setSessionState("invalid");
+        return;
+      }
+      // يوجد أثر للرمز — نمنح الأجهزة البطيئة عشر ثوانٍ
+      timeout = setTimeout(() => {
+        if (!cancelled) setSessionState((s) => (s === "waiting" ? "invalid" : s));
+      }, 10000);
+    });
+
     return () => {
-      clearTimeout(timeout);
-      subscription.unsubscribe();
+      cancelled = true;
+      if (timeout) clearTimeout(timeout);
+      sub.subscription.unsubscribe();
     };
   }, []);
 
@@ -131,6 +157,7 @@ export default function ResetPasswordPage() {
           <Input
             type="password"
             dir="ltr"
+            autoComplete="new-password"
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -142,6 +169,7 @@ export default function ResetPasswordPage() {
           <Input
             type="password"
             dir="ltr"
+            autoComplete="new-password"
             required
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
