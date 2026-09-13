@@ -110,10 +110,14 @@ export default function Dashboard() {
                 <div className="space-y-4">
                   {notifications.map((notif, idx) => (
                     <div key={idx} className="flex gap-4 p-3 rounded-lg hover:bg-gray-50 transition-colors">
-                      <div className="mt-1 w-2 h-2 rounded-full bg-gold" />
+                      <div className={`mt-1 w-2 h-2 rounded-full ${notif.reminderType === "rsvp" ? "bg-blue-400" : "bg-gold"}`} />
                       <div>
                         <p className="text-sm text-gray-900 font-medium">
-                          {notif.reminderType === '24h' ? 'تبقّى 24 ساعة على ' : 'تبقّى 3 ساعات على '}
+                          {notif.reminderType === "24h"
+                          ? "تبقّى 24 ساعة على "
+                          : notif.reminderType === "3h"
+                            ? "تبقّى 3 ساعات على "
+                            : "لم يرد بعد " + (notif.pendingCount ?? 0) + " من مدعويك في "}
                           {notif.eventTitle}
                         </p>
                         <p className="text-xs text-gray-600 mt-1">
