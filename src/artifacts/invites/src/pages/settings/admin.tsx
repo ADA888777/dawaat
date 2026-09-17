@@ -822,8 +822,8 @@ export default function AdminSettings({ me }: { me: Me }) {
         <SettingsCard
           id="support"
           icon={Mail}
-          title="البريد الرسمي وخدمة العملاء"
-          description="تظهر هذه البيانات للمستخدمين في صفحة المساعدة."
+          title="معلومات التواصل"
+          description="تظهر في قسم تواصل معنا بالقائمة الجانبية وفي صفحة المساعدة، وأي تعديل ينعكس عند جميع العملاء."
         >
           <FieldRow label="البريد الرسمي" htmlFor="support-email">
             <Input
@@ -858,10 +858,19 @@ export default function AdminSettings({ me }: { me: Me }) {
               onChange={(event) => setField("supportWhatsapp", event.target.value)}
             />
           </FieldRow>
+          <FieldRow label="حساب سناب شات" htmlFor="support-snapchat" hint="اسم المستخدم فقط بدون @ وبدون رابط.">
+            <Input
+              id="support-snapchat"
+              dir="ltr"
+              placeholder="yf.343"
+              value={form.supportSnapchat}
+              onChange={(event) => setField("supportSnapchat", event.target.value)}
+            />
+          </FieldRow>
           <SaveBar
             pending={updateSettings.isPending}
             onSave={() =>
-              saveSettings(["supportEmail", "supportPhone", "supportWhatsapp"], "تم حفظ بيانات التواصل")
+              saveSettings(["supportEmail", "supportPhone", "supportWhatsapp", "supportSnapchat"], "تم حفظ بيانات التواصل")
             }
           />
         </SettingsCard>
