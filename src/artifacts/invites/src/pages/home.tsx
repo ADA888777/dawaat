@@ -62,6 +62,15 @@ const HERO_VEIL =
   "linear-gradient(270deg, rgba(250,244,236,0.96) 0%, rgba(250,244,236,0.90) 42%," +
   " rgba(250,244,236,0.55) 62%, rgba(250,244,236,0.12) 80%, rgba(250,244,236,0) 100%)";
 
+/* حجاب أنعم للجوال لأن النص يظهر في المنتصف فوق الصورة. */
+const HERO_VEIL_SOFT =
+  "linear-gradient(180deg, rgba(250,244,236,0.90) 0%, rgba(250,244,236,0.80) 45%," +
+  " rgba(250,244,236,0.88) 100%)";
+
+/* صورة خلفية البطل من مجلد public: نسخة للجوال وأخرى عريضة للشاشات الكبيرة. */
+const HERO_IMAGE_MOBILE = "/hero-mobile.png";
+const HERO_IMAGE_DESKTOP = "/hero-desktop.png";
+
 function Ornament() {
   return (
     <div
@@ -152,10 +161,29 @@ export default function Home() {
       <main>
         {/* ═══ البطل ═══ */}
         <section
-          className="relative flex min-h-[clamp(480px,68vh,720px)] items-center overflow-hidden py-14 md:py-20"
+          className="relative flex min-h-[clamp(520px,74vh,760px)] items-center overflow-hidden py-14 md:py-20"
           style={{ backgroundImage: HERO_SILK, backgroundSize: "cover", backgroundPosition: "center" }}
         >
-          <div className="pointer-events-none absolute inset-0" style={{ backgroundImage: HERO_VEIL }} />
+          <div
+            className="pointer-events-none absolute inset-0 bg-cover bg-center bg-no-repeat md:hidden"
+            style={{ backgroundImage: "url(" + HERO_IMAGE_MOBILE + ")" }}
+            aria-hidden="true"
+          />
+          <div
+            className="pointer-events-none absolute inset-0 hidden bg-cover bg-left bg-no-repeat md:block"
+            style={{ backgroundImage: "url(" + HERO_IMAGE_DESKTOP + ")" }}
+            aria-hidden="true"
+          />
+          <div
+            className="pointer-events-none absolute inset-0 md:hidden"
+            style={{ backgroundImage: HERO_VEIL_SOFT }}
+            aria-hidden="true"
+          />
+          <div
+            className="pointer-events-none absolute inset-0 hidden md:block"
+            style={{ backgroundImage: HERO_VEIL }}
+            aria-hidden="true"
+          />
 
           <div className="relative z-10 mx-auto w-full max-w-[1120px] px-5 md:px-6">
             <div className="text-center md:max-w-[560px] md:text-right">
@@ -173,7 +201,7 @@ export default function Home() {
 
               <Link
                 href="/sign-up"
-                className="mt-8 inline-flex w-full items-center justify-center rounded-full border border-gold bg-ink px-14 py-4 text-[18px] font-bold text-gold-light shadow-[0_12px_30px_rgba(42,38,34,0.22)] transition-all hover:-translate-y-0.5 hover:bg-ink-soft sm:w-auto md:text-[19px]"
+                className="mt-8 inline-flex w-full items-center justify-center rounded-full border-2 border-gold bg-ink px-14 py-4 text-[18px] font-bold text-gold-light shadow-[0_16px_36px_rgba(42,38,34,0.30)] transition-all hover:-translate-y-0.5 hover:bg-ink-soft sm:w-auto md:text-[19px]"
               >
                 ابدأ الآن
               </Link>
