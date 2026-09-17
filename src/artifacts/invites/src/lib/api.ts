@@ -1031,6 +1031,7 @@ export interface AppSettings {
   supportEmail: string;
   supportPhone: string;
   supportWhatsapp: string;
+  supportSnapchat: string;
   maintenanceMode: boolean;
   maintenanceMessage: string;
   signupsEnabled: boolean;
@@ -1054,6 +1055,7 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   supportEmail: "support_email",
   supportPhone: "support_phone",
   supportWhatsapp: "support_whatsapp",
+  supportSnapchat: "support_snapchat",
   maintenanceMode: "maintenance_mode",
   maintenanceMessage: "maintenance_message",
   signupsEnabled: "signups_enabled",
@@ -1077,6 +1079,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   supportEmail: "",
   supportPhone: "",
   supportWhatsapp: "",
+  supportSnapchat: "",
   maintenanceMode: false,
   maintenanceMessage: "",
   signupsEnabled: true,
