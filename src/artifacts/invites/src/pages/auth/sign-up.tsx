@@ -39,12 +39,22 @@ export default function SignUpPage() {
       },
     });
     setIsLoading(false);
+    const EXISTS_MESSAGE = "هذا البريد مسجل مسبقاً. سجّل الدخول بحسابك، وإذا نسيت كلمة المرور فاستخدم صفحة استعادة كلمة المرور.";
     if (authError) {
-      setError(
-        authError.message.includes("already registered")
-          ? "هذا البريد الإلكتروني مسجل مسبقاً"
-          : "تعذر إنشاء الحساب، حاول مرة أخرى",
-      );
+      const message = authError.message.toLowerCase();
+      const alreadyExists =
+        message.includes("already registered") ||
+        message.includes("already been registered") ||
+        message.includes("user already exists");
+      setError(alreadyExists ? EXISTS_MESSAGE : "تعذر إنشاء الحساب، حاول مرة أخرى");
+      return;
+    }
+    // Repeated sign-up: Supabase returns a success response with no session
+    // and an empty identities array, and it does not send any email.
+    const isRepeatedSignup =
+      !data.session && (data.user?.identities?.length ?? 0) === 0;
+    if (isRepeatedSignup) {
+      setError(EXISTS_MESSAGE);
       return;
     }
     if (data.session) {
