@@ -3,13 +3,15 @@ import {
   BookUser,
   CheckCheck,
   ClipboardPaste,
+  Contact,
   Download,
-  FileUp,
-  Keyboard,
+  FileSpreadsheet,
+  Info,
   Loader2,
   Plus,
-  Smartphone,
+  Search,
   Trash2,
+  UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,10 +21,10 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ContactImportError,
   contactFileAccept,
@@ -36,6 +38,7 @@ import {
   pickContacts,
   type PickedContact,
 } from "@/lib/contact-picker";
+import { formatPhoneForDisplay, isSaudiMobile } from "@/lib/phone";
 
 interface ContactImportDialogProps {
   open: boolean;
@@ -60,9 +63,14 @@ interface StagedRow extends PickedContact {
   alreadyInvited: boolean;
 }
 
+type Method = "device" | "vcf" | "csv" | "manual" | "paste";
+
+const VCF_ACCEPT = ".vcf,.vcard,text/vcard,text/x-vcard,text/directory";
+const CSV_ACCEPT = ".csv,.txt,text/csv,text/plain,application/vnd.ms-excel";
+
 function downloadCsvTemplate() {
   const content =
-    "\ufeffname,phone\nسعود العتيبي,0501234567\nنورة القحطاني,+966502345678\n";
+    "﻿name,phone\nسعود العتيبي,0501234567\nنورة القحطاني,+966502345678\n";
   const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -73,12 +81,14 @@ function downloadCsvTemplate() {
 }
 
 /**
- * نافذة إضافة المدعوين بكل الطرق التي تعمل فعلاً على أي جهاز.
+ * نافذة «جهات الاتصال»: اختيار/استيراد ← مراجعة وتحديد ← إضافة للمدعوين.
  *
- * القاعدة المطبّقة: لكل جهاز طريق يعمل، ولا يُترك المستخدم أمام رسالة
- * «غير مدعوم» وحدها. أندرويد يفتح جهات الاتصال مباشرة، والآيفون يستورد
- * ملف vCard، والكمبيوتر يستورد vCard أو CSV، والجميع يملك اللصق والإدخال
- * اليدوي. وبعد أي طريقة تُعرض القائمة للمراجعة والتحديد قبل الحفظ.
+ * - المتصفح الذي يدعم Contact Picker (أندرويد Chrome/Edge غالباً) يفتح
+ *   جهات الاتصال مباشرة، مع إبقاء البدائل ظاهرة تحته.
+ * - غير الداعم (iPhone Safari وكل متصفحات الكمبيوتر) لا يرى رسالة خطأ،
+ *   بل يرى مباشرة: استيراد ملف VCF، استيراد CSV، إضافة يدوية.
+ * - كل الطرق تنتهي بنفس قائمة المراجعة: أرقام موحّدة (+9665…) بلا تكرار،
+ *   وتحديد الكل أو أشخاص معينين قبل الحفظ.
  */
 export function ContactImportDialog({
   open,
@@ -92,19 +102,24 @@ export function ContactImportDialog({
 }: ContactImportDialogProps) {
   const support = useMemo(() => getContactPickerSupport(), []);
   const isIos = support.platform === "ios";
+  const fileAccept = (fallback: string) =>
+    contactFileAccept(support.platform) === undefined ? undefined : fallback;
 
-  const [tab, setTab] = useState(support.supported ? "device" : "file");
+  const [method, setMethod] = useState<Method | null>(null);
   const [staged, setStaged] = useState<StagedRow[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [filter, setFilter] = useState("");
 
   const [pasteText, setPasteText] = useState("");
   const [manualName, setManualName] = useState("");
   const [manualPhone, setManualPhone] = useState("");
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const vcfInputRef = useRef<HTMLInputElement>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+  const reviewRef = useRef<HTMLDivElement>(null);
 
   /** مفاتيح المدعوين الحاليين بصيغة موحّدة */
   const knownKeys = useMemo(() => {
@@ -128,7 +143,7 @@ export function ContactImportDialog({
         ...contact,
         key,
         alreadyInvited,
-        // المكرر يُعرض لكن لا يُحدَّد تلقائياً حتى لا يُضاف مرتين
+        // المدعو مسبقاً يُعرض لكن لا يُحدَّد تلقائياً حتى لا يُضاف مرتين
         selected: before ? before.selected : !alreadyInvited,
       };
     });
@@ -143,6 +158,7 @@ export function ContactImportDialog({
     setPasteText("");
     setManualName("");
     setManualPhone("");
+    setFilter("");
     setDragging(false);
 
     if (rows.length > 0) {
@@ -153,14 +169,21 @@ export function ContactImportDialog({
           " جهة اتصال من جهازك" +
           (dup > 0 ? " — " + dup + " منهم مدعوون مسبقاً وتُركوا بلا تحديد" : ""),
       );
-      setTab("device");
+      setMethod("device");
       return;
     }
 
     setNotice(initialMessage ?? null);
-    setTab(support.supported ? "device" : "file");
+    // على الآيفون نعرض خطوات ملف VCF مباشرة لأنها الطريقة العملية الوحيدة
+    setMethod(support.supported ? null : isIos ? "vcf" : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialContacts, initialMessage]);
+
+  const scrollToReview = () =>
+    window.setTimeout(
+      () => reviewRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+      50,
+    );
 
   const addContacts = (list: PickedContact[], sourceLabel: string) => {
     if (list.length === 0) {
@@ -175,6 +198,7 @@ export function ContactImportDialog({
     );
     const rows = buildRows(merged, previous);
     const added = rows.length - staged.length;
+    const duplicatesInSource = list.length - added;
     const invitedBefore = rows.filter((row) => row.alreadyInvited).length;
 
     setStaged(rows);
@@ -183,22 +207,27 @@ export function ContactImportDialog({
     const messages: string[] = [
       added === 0
         ? "كل الأرقام في " + sourceLabel + " موجودة في القائمة مسبقاً"
-        : "أضفنا " + added + " من " + sourceLabel,
+        : "قرأنا " + added + " من " + sourceLabel,
     ];
+    if (added > 0 && duplicatesInSource > 0) {
+      messages.push("حُذف " + duplicatesInSource + " رقم مكرر");
+    }
     if (invitedBefore > 0) {
-      messages.push(invitedBefore + " منهم مدعوون مسبقاً وتُركوا بلا تحديد");
+      messages.push(invitedBefore + " مدعوون مسبقاً وتُركوا بلا تحديد");
     }
     setNotice(messages.join(" — "));
+    scrollToReview();
   };
 
   const handleDevicePicker = async () => {
+    setMethod("device");
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       const picked = await pickContacts();
       if (picked.length === 0) {
-        setNotice("لم تختر أي جهة اتصال");
+        setNotice("لم تختر أي جهة اتصال — أعد المحاولة أو استخدم طريقة أخرى");
         return;
       }
       addContacts(picked, "جهات اتصال الجهاز");
@@ -206,10 +235,9 @@ export function ContactImportDialog({
       setError(
         err instanceof ContactImportError
           ? err.message
-          : "تعذر فتح جهات الاتصال. استخدم استيراد الملف بالأسفل.",
+          : "تعذر فتح جهات الاتصال. استخدم استيراد ملف VCF أو CSV.",
       );
-      // البديل يُفتح تلقائياً بدل ترك المستخدم أمام رسالة خطأ فقط
-      setTab("file");
+      setMethod("vcf");
     } finally {
       setBusy(false);
     }
@@ -226,28 +254,37 @@ export function ContactImportDialog({
       if (parsed.contacts.length === 0) {
         setError(
           "لم نجد جهة اتصال لها رقم جوال في الملف. المقبول: ملف جهات اتصال" +
-            " بصيغة vcf، أو CSV فيه عمود للاسم وعمود لرقم الجوال.",
+            " بصيغة VCF، أو CSV فيه عمود للاسم وعمود لرقم الجوال.",
         );
         return;
       }
       const label =
         parsed.kind === "vcard"
-          ? "ملف جهات الاتصال"
+          ? "ملف VCF"
           : parsed.kind === "csv"
             ? "ملف CSV"
-            : "الملف النصي";
+            : "الملف";
       addContacts(parsed.contacts, label);
     } catch {
-      setError("تعذر قراءة الملف. تأكد أنه ملف جهات اتصال vcf أو ملف CSV.");
+      setError("تعذر قراءة الملف. تأكد أنه ملف جهات اتصال VCF أو ملف CSV.");
     } finally {
       setBusy(false);
     }
   };
 
-  const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    void handleFiles(files);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const onFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.target;
+    void handleFiles(input.files).finally(() => {
+      input.value = "";
+    });
+  };
+
+  const chooseFileMethod = (next: "vcf" | "csv") => {
+    setMethod(next);
+    setError(null);
+    // على الآيفون نترك المستخدم يقرأ خطوات تصدير VCF أولاً
+    if (next === "vcf" && isIos) return;
+    (next === "vcf" ? vcfInputRef : csvInputRef).current?.click();
   };
 
   const handlePasteList = () => {
@@ -285,6 +322,17 @@ export function ContactImportDialog({
     [staged],
   );
 
+  const visibleRows = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return staged;
+    const digits = q.replace(/\D/g, "");
+    return staged.filter(
+      (row) =>
+        row.name.toLowerCase().includes(q) ||
+        (digits.length >= 3 && row.phone.replace(/\D/g, "").includes(digits)),
+    );
+  }, [staged, filter]);
+
   const toggleAll = () =>
     setStaged((prev) => prev.map((row) => ({ ...row, selected: !allSelected })));
 
@@ -305,105 +353,150 @@ export function ContactImportDialog({
 
   const tooMany = selectedRows.length > maxRows;
 
-  const handleOpenChange = (next: boolean) => onOpenChange(next);
+  const optionCard = (
+    value: Method,
+    icon: React.ReactNode,
+    title: string,
+    hint: string,
+    onClick: () => void,
+    recommended = false,
+  ) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      data-method={value}
+      aria-pressed={method === value}
+      className={
+        "relative flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-3 text-center transition-colors disabled:opacity-60 " +
+        (method === value
+          ? "border-gold bg-gold/10"
+          : "border-line bg-white hover:border-gold/60")
+      }
+    >
+      {recommended && (
+        <span className="absolute -top-2 rounded-full bg-gold px-2 text-[10px] font-bold text-black">
+          الأنسب لجهازك
+        </span>
+      )}
+      <span className="text-gold-deep">{icon}</span>
+      <span className="text-sm font-bold text-gray-900">{title}</span>
+      <span className="text-[11px] leading-snug text-gray-600">{hint}</span>
+    </button>
+  );
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         dir="rtl"
         className="max-h-[92vh] max-w-2xl overflow-y-auto"
       >
-        <DialogHeader>
-          <DialogTitle>إضافة مدعوين</DialogTitle>
+        <DialogHeader className="text-right sm:text-right">
+          <DialogTitle>إضافة مدعوين من جهات الاتصال</DialogTitle>
+          <DialogDescription className="text-right">
+            ١ اختر أو استورد جهات الاتصال ← ٢ حدّد من تريد ← ٣ أضفهم إلى قائمة
+            المدعوين
+          </DialogDescription>
         </DialogHeader>
 
-        <p className="text-sm text-gray-600">
-          كل الطرق تقرأ الاسم ورقم الجوال تلقائياً، ثم تختار من القائمة من
-          تضيفه فعلاً.
-        </p>
+        {/* مدخلات الملفات مخفية — تُفتح من البطاقات والأزرار */}
+        <input
+          ref={vcfInputRef}
+          type="file"
+          multiple
+          accept={fileAccept(VCF_ACCEPT)}
+          className="hidden"
+          data-testid="vcf-input"
+          onChange={onFileInput}
+        />
+        <input
+          ref={csvInputRef}
+          type="file"
+          multiple
+          accept={fileAccept(CSV_ACCEPT)}
+          className="hidden"
+          data-testid="csv-input"
+          onChange={onFileInput}
+        />
 
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="device" className="gap-1 px-1 text-[11px] sm:text-xs">
-              <BookUser className="hidden h-4 w-4 sm:inline-block" /> جهات الاتصال
-            </TabsTrigger>
-            <TabsTrigger value="file" className="gap-1 px-1 text-[11px] sm:text-xs">
-              <FileUp className="hidden h-4 w-4 sm:inline-block" /> ملف
-            </TabsTrigger>
-            <TabsTrigger value="paste" className="gap-1 px-1 text-[11px] sm:text-xs">
-              <ClipboardPaste className="hidden h-4 w-4 sm:inline-block" /> لصق قائمة
-            </TabsTrigger>
-            <TabsTrigger value="manual" className="gap-1 px-1 text-[11px] sm:text-xs">
-              <Keyboard className="hidden h-4 w-4 sm:inline-block" /> يدوي
-            </TabsTrigger>
-          </TabsList>
-
-          {/* ① جهات اتصال الجهاز — تُفتح تلقائياً على أندرويد Chrome/Edge */}
-          <TabsContent value="device" className="space-y-3 pt-4">
-            {support.supported ? (
-              <>
-                <Button
-                  type="button"
-                  onClick={handleDevicePicker}
-                  disabled={busy}
-                  className="w-full bg-ink text-gold-light hover:bg-ink-soft"
-                >
-                  {busy ? (
-                    <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+        {/* ① الاختيار أو الاستيراد */}
+        <section className="space-y-3">
+          {support.supported ? (
+            <>
+              <Button
+                type="button"
+                onClick={() => void handleDevicePicker()}
+                disabled={busy}
+                className="h-auto w-full flex-col gap-0.5 bg-ink py-3 text-gold-light hover:bg-ink-soft"
+              >
+                <span className="flex items-center gap-2 text-base font-bold">
+                  {busy && method === "device" ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
-                    <BookUser className="ml-2 h-4 w-4" />
+                    <BookUser className="h-5 w-5" />
                   )}
-                  فتح جهات اتصال الجهاز
-                </Button>
-                <p className="text-center text-xs text-gray-600">
-                  تُفتح جهات الاتصال تلقائياً عند الضغط على «استيراد من جهات
-                  الاتصال». اختر شخصاً أو عدة أشخاص، ثم راجعهم في القائمة
-                  بالأسفل قبل الحفظ.
-                </p>
-              </>
-            ) : (
-              <div className="space-y-3 rounded-lg border border-line bg-cream-2 p-4">
-                <div className="flex items-start gap-2">
-                  <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-gold-deep" />
-                  <p className="text-xs leading-relaxed text-gray-700">
-                    {support.reason}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="bg-ink text-gold-light hover:bg-ink-soft"
-                    onClick={() => setTab("file")}
-                  >
-                    <FileUp className="ml-2 h-4 w-4" />
-                    {isIos ? "استيراد ملف جهات الاتصال" : "استيراد ملف vcf أو CSV"}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="border-line"
-                    onClick={() => setTab("paste")}
-                  >
-                    <ClipboardPaste className="ml-2 h-4 w-4" /> لصق قائمة
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="border-line"
-                    onClick={() => setTab("manual")}
-                  >
-                    <Plus className="ml-2 h-4 w-4" /> إضافة يدوية
-                  </Button>
-                </div>
-              </div>
-            )}
-          </TabsContent>
+                  فتح جهات الاتصال
+                </span>
+                <span className="text-xs font-normal opacity-80">
+                  اختر شخصاً أو عدة أشخاص من جهازك
+                </span>
+              </Button>
+              <p className="text-center text-xs text-gray-500">
+                أو استورد بطريقة أخرى
+              </p>
+            </>
+          ) : (
+            <div className="flex items-start gap-2 rounded-lg border border-line bg-cream-2 px-3 py-2">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-gold-deep" />
+              <p className="text-xs leading-relaxed text-gray-700">
+                {isIos
+                  ? "على الآيفون لا يسمح المتصفح بفتح جهات الاتصال من المواقع، لذلك استورد ملف VCF من تطبيق جهات الاتصال — يأخذ دقيقة واحدة."
+                  : "هذا المتصفح لا يتيح فتح جهات الاتصال مباشرة. اختر إحدى الطرق التالية — كلها تعمل على جهازك."}
+              </p>
+            </div>
+          )}
 
-          {/* ② ملف واحد يقبل vCard و CSV — الطريق العملي على الآيفون والكمبيوتر */}
-          <TabsContent value="file" className="space-y-4 pt-4">
+          <div className="grid grid-cols-3 gap-2 pt-1">
+            {optionCard(
+              "vcf",
+              <Contact className="h-6 w-6" />,
+              "استيراد ملف VCF",
+              "ملف جهات الاتصال من الجوال",
+              () => chooseFileMethod("vcf"),
+              !support.supported && support.platform !== "desktop",
+            )}
+            {optionCard(
+              "csv",
+              <FileSpreadsheet className="h-6 w-6" />,
+              "استيراد CSV",
+              "من Excel أو Google",
+              () => chooseFileMethod("csv"),
+            )}
+            {optionCard(
+              "manual",
+              <UserPlus className="h-6 w-6" />,
+              "إضافة يدوية",
+              "اكتب الاسم والرقم",
+              () => {
+                setMethod("manual");
+                setError(null);
+              },
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMethod("paste");
+              setError(null);
+            }}
+            className="mx-auto flex items-center gap-1 text-xs text-gold-deep underline"
+          >
+            <ClipboardPaste className="h-3.5 w-3.5" /> أو الصق قائمة أسماء وأرقام
+          </button>
+
+          {/* تفاصيل الطريقة المختارة */}
+          {method === "vcf" && (
             <div
               onDragOver={(event) => {
                 event.preventDefault();
@@ -416,132 +509,157 @@ export function ContactImportDialog({
                 void handleFiles(event.dataTransfer.files);
               }}
               className={
-                "rounded-lg border-2 border-dashed p-5 text-center transition-colors " +
-                (dragging
-                  ? "border-gold bg-gold/5"
-                  : "border-line bg-cream-2")
+                "space-y-3 rounded-lg border-2 border-dashed p-4 " +
+                (dragging ? "border-gold bg-gold/5" : "border-line bg-cream-2")
               }
             >
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept={contactFileAccept(support.platform)}
-                className="hidden"
-                onChange={handleFileInput}
-              />
-              <FileUp className="mx-auto mb-2 h-6 w-6 text-gold-deep" />
-              <Button
-                type="button"
-                className="w-full bg-ink text-gold-light hover:bg-ink-soft sm:w-auto"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={busy}
-              >
-                {busy ? (
-                  <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <FileUp className="ml-2 h-4 w-4" />
-                )}
-                اختيار ملف جهات اتصال
-              </Button>
-              <p className="mt-2 text-xs leading-relaxed text-gray-600">
-                نقبل vcf و CSV ونتعرّف على النوع من محتوى الملف. يمكنك اختيار
-                عدة ملفات معاً، وعلى الكمبيوتر يمكنك سحب الملف وإفلاته هنا.
-              </p>
-            </div>
-
-            <div className="space-y-2 rounded-lg border border-line p-4">
               <h3 className="text-sm font-semibold text-gray-900">
-                {isIos ? "خطوات الآيفون" : "من أين أحصل على الملف؟"}
+                {isIos ? "تصدير جهات الاتصال من الآيفون" : "ملف VCF"}
               </h3>
               {isIos ? (
                 <ol className="list-decimal space-y-1 pr-4 text-xs leading-relaxed text-gray-700">
                   <li>افتح تطبيق «جهات الاتصال».</li>
                   <li>
-                    لعدة أشخاص: اضغط «قوائم» أو «تحديد» ← علّم من تريد ← «مشاركة»
-                    — يخرج ملف واحد يحتوي الجميع.
+                    لعدة أشخاص: اضغط «قوائم» ← اضغط مطولاً على «كل جهات الاتصال»
+                    أو قائمة ← «تصدير» — يخرج ملف واحد فيه الجميع.
                   </li>
                   <li>لشخص واحد: افتحه ← «مشاركة جهة الاتصال».</li>
-                  <li>اختر «حفظ في الملفات» واحفظه في «على الآيفون».</li>
-                  <li>ارجع هنا واضغط «اختيار ملف جهات اتصال» ثم اختر الملف.</li>
+                  <li>اختر «حفظ في الملفات».</li>
+                  <li>ارجع هنا واضغط الزر بالأسفل واختر الملف.</li>
                 </ol>
               ) : (
                 <ul className="list-disc space-y-1 pr-4 text-xs leading-relaxed text-gray-700">
-                  <li>أندرويد: «جهات الاتصال» ← «إعدادات» ← «تصدير» ← ملف vcf.</li>
-                  <li>الآيفون: «جهات الاتصال» ← «تحديد» ← «مشاركة» ← «حفظ في الملفات».</li>
-                  <li>Google Contacts: «تصدير» ← Google CSV أو vCard.</li>
-                  <li>Outlook و iCloud و Excel: ملف CSV فيه الاسم ورقم الجوال.</li>
+                  <li>أندرويد: «جهات الاتصال» ← «إعدادات» ← «تصدير» ← ملف ‎.vcf‎.</li>
+                  <li>الآيفون: «جهات الاتصال» ← «قوائم» ← «تصدير» ← «حفظ في الملفات».</li>
+                  <li>Google Contacts: «تصدير» ← vCard.</li>
+                  <li>على الكمبيوتر يمكنك سحب الملف وإفلاته هنا.</li>
                 </ul>
               )}
               <Button
                 type="button"
-                variant="ghost"
-                className="text-xs"
-                onClick={downloadCsvTemplate}
+                className="w-full bg-ink text-gold-light hover:bg-ink-soft"
+                onClick={() => vcfInputRef.current?.click()}
+                disabled={busy}
               >
-                <Download className="ml-1 h-4 w-4" /> تنزيل نموذج CSV جاهز
+                {busy ? (
+                  <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Contact className="ml-2 h-4 w-4" />
+                )}
+                اختيار ملف VCF
               </Button>
             </div>
-          </TabsContent>
+          )}
 
-          {/* ③ لصق قائمة — يعمل في أي مكان بلا أي إذن */}
-          <TabsContent value="paste" className="space-y-3 pt-4">
-            <Label className="text-sm">الصق كل مدعو في سطر (الاسم ثم الرقم)</Label>
-            <Textarea
-              dir="rtl"
-              value={pasteText}
-              onChange={(event) => setPasteText(event.target.value)}
-              className="h-40 resize-none font-sans"
-              placeholder={
-                "سعود العتيبي 0501234567\nنورة القحطاني، +966502345678\n0503456789"
+          {method === "csv" && (
+            <div
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragging(false);
+                void handleFiles(event.dataTransfer.files);
+              }}
+              className={
+                "space-y-3 rounded-lg border-2 border-dashed p-4 " +
+                (dragging ? "border-gold bg-gold/5" : "border-line bg-cream-2")
               }
-            />
-            <p className="text-xs text-gray-600">
-              نقبل الفاصلة أو المسافة أو Tab، والأرقام العربية تُحوَّل تلقائياً.
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full border-line"
-              onClick={handlePasteList}
-              disabled={busy || pasteText.trim() === ""}
             >
-              <ClipboardPaste className="ml-2 h-4 w-4" /> قراءة القائمة
-            </Button>
-          </TabsContent>
+              <p className="text-xs leading-relaxed text-gray-700">
+                ملف فيه عمود للاسم وعمود لرقم الجوال (بالعربي أو الإنجليزي). نقبل
+                تصدير Google Contacts و Outlook و Excel، والأرقام بأي صيغة.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  className="flex-1 bg-ink text-gold-light hover:bg-ink-soft"
+                  onClick={() => csvInputRef.current?.click()}
+                  disabled={busy}
+                >
+                  {busy ? (
+                    <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet className="ml-2 h-4 w-4" />
+                  )}
+                  اختيار ملف CSV
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-line text-xs"
+                  onClick={downloadCsvTemplate}
+                >
+                  <Download className="ml-1 h-4 w-4" /> نموذج جاهز
+                </Button>
+              </div>
+            </div>
+          )}
 
-          {/* ④ إدخال يدوي */}
-          <TabsContent value="manual" className="space-y-3 pt-4">
-            <div>
-              <Label className="mb-1 block text-sm">الاسم</Label>
-              <Input
-                value={manualName}
-                onChange={(event) => setManualName(event.target.value)}
-                placeholder="سعود العتيبي"
-              />
-            </div>
-            <div>
-              <Label className="mb-1 block text-sm">رقم الجوال</Label>
-              <Input
-                value={manualPhone}
-                onChange={(event) => setManualPhone(event.target.value)}
-                dir="ltr"
-                inputMode="tel"
-                className="text-right"
-                placeholder="0501234567"
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full border-line"
-              onClick={handleManualAdd}
-              disabled={busy}
+          {method === "manual" && (
+            <form
+              className="grid gap-2 rounded-lg border border-line p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleManualAdd();
+              }}
             >
-              <Plus className="ml-2 h-4 w-4" /> إضافة إلى القائمة
-            </Button>
-          </TabsContent>
-        </Tabs>
+              <div>
+                <Label className="mb-1 block text-xs">الاسم</Label>
+                <Input
+                  value={manualName}
+                  onChange={(event) => setManualName(event.target.value)}
+                  placeholder="سعود العتيبي"
+                />
+              </div>
+              <div>
+                <Label className="mb-1 block text-xs">رقم الجوال</Label>
+                <Input
+                  value={manualPhone}
+                  onChange={(event) => setManualPhone(event.target.value)}
+                  dir="ltr"
+                  inputMode="tel"
+                  className="text-right"
+                  placeholder="05XXXXXXXX"
+                />
+              </div>
+              <Button
+                type="submit"
+                variant="outline"
+                className="border-line"
+                disabled={busy || manualPhone.trim() === ""}
+              >
+                <Plus className="ml-1 h-4 w-4" /> إضافة
+              </Button>
+            </form>
+          )}
+
+          {method === "paste" && (
+            <div className="space-y-2 rounded-lg border border-line p-4">
+              <Label className="text-xs">كل مدعو في سطر (الاسم ثم الرقم)</Label>
+              <Textarea
+                dir="rtl"
+                value={pasteText}
+                onChange={(event) => setPasteText(event.target.value)}
+                className="h-32 resize-none font-sans"
+                placeholder={
+                  "سعود العتيبي 0501234567\nنورة القحطاني، +966502345678\n0503456789"
+                }
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-line"
+                onClick={handlePasteList}
+                disabled={busy || pasteText.trim() === ""}
+              >
+                <ClipboardPaste className="ml-2 h-4 w-4" /> قراءة القائمة
+              </Button>
+            </div>
+          )}
+        </section>
 
         {error && (
           <div
@@ -552,13 +670,16 @@ export function ContactImportDialog({
           </div>
         )}
         {notice && !error && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm leading-relaxed text-emerald-700">
+          <div
+            role="status"
+            className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm leading-relaxed text-emerald-700"
+          >
             {notice}
           </div>
         )}
 
-        {/* قائمة المراجعة: تحديد الكل أو أشخاص محددين قبل الحفظ */}
-        <div className="rounded-lg border border-line">
+        {/* ② المراجعة والتحديد */}
+        <div ref={reviewRef} className="rounded-lg border border-line">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2">
             <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-gray-900">
               <Checkbox
@@ -571,7 +692,7 @@ export function ContactImportDialog({
             </label>
 
             <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-600">
+              <span className="text-xs text-gray-600" data-testid="selected-count">
                 محدد {selectedRows.length} من {staged.length}
               </span>
               {freshCount > 0 && freshCount < staged.length && (
@@ -595,13 +716,28 @@ export function ContactImportDialog({
             </div>
           </div>
 
+          {staged.length > 8 && (
+            <div className="relative border-b border-line px-4 py-2">
+              <Search className="absolute right-6 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder="بحث في القائمة..."
+                className="h-8 pr-8 text-sm"
+              />
+            </div>
+          )}
+
           {staged.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-gray-600">
               لم تُضف أي جهة اتصال بعد — اختر طريقة من الأعلى.
             </p>
           ) : (
-            <ul className="max-h-60 divide-y divide-line overflow-y-auto">
-              {staged.map((row) => (
+            <ul
+              className="max-h-64 divide-y divide-line overflow-y-auto"
+              data-testid="staged-list"
+            >
+              {visibleRows.map((row) => (
                 <li
                   key={row.key}
                   className={
@@ -616,25 +752,33 @@ export function ContactImportDialog({
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium text-gray-900">{row.name}</p>
-                    {row.alreadyInvited && (
+                    {row.alreadyInvited ? (
                       <span className="text-[11px] text-amber-700">
                         مدعو مسبقاً في هذه المناسبة
                       </span>
-                    )}
+                    ) : !isSaudiMobile(row.phone) ? (
+                      <span className="text-[11px] text-gray-500">رقم دولي</span>
+                    ) : null}
                   </div>
                   <span className="shrink-0 text-gray-600" dir="ltr">
-                    {row.phone}
+                    {formatPhoneForDisplay(row.phone)}
                   </span>
                   <button
                     type="button"
                     onClick={() => removeRow(row.key)}
                     className="shrink-0 text-red-500"
                     title="إزالة من القائمة"
+                    aria-label={"إزالة " + row.name}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </li>
               ))}
+              {visibleRows.length === 0 && (
+                <li className="px-4 py-4 text-center text-xs text-gray-500">
+                  لا نتائج للبحث
+                </li>
+              )}
             </ul>
           )}
         </div>
@@ -646,6 +790,7 @@ export function ContactImportDialog({
           </p>
         )}
 
+        {/* ③ الإضافة */}
         <Button
           type="button"
           className="h-12 w-full bg-gold font-bold text-black hover:bg-gold/90"
