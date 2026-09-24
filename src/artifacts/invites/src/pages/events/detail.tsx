@@ -11,6 +11,7 @@ import {
   MAX_IMPORT_ROWS,
   phoneMatchKey,
   toWesternDigits,
+  formatPhoneForDisplay,
   type Guest,
 } from "@/lib/api";
 import { useParams, Link } from "wouter";
@@ -243,12 +244,21 @@ export default function EventDetail() {
           setIsImportOpen(false);
           setImportSeed([]);
           setImportMessage(null);
+          // الخطوة التالية مباشرة: المضافون الجدد يصبحون محددين وجاهزين للإرسال
+          if (res.ids.length > 0) {
+            setSearchTerm("");
+            setSelectedIds(res.ids);
+          }
           toast({
-            title: "تمت إضافة " + res.created + " مدعو",
+            title:
+              res.created > 0
+                ? "تمت إضافة " + res.created + " مدعو وتحديدهم"
+                : "لم يُضف أحد — كل الأرقام موجودة مسبقاً",
             description:
-              res.skipped > 0
+              (res.created > 0 ? "اضغط «إرسال الدعوات» لإرسالها لهم. " : "") +
+              (res.skipped > 0
                 ? "تم تجاهل " + res.skipped + " (مكرر أو رقم غير صالح)"
-                : undefined,
+                : ""),
           });
         },
         onError: (err) =>
@@ -487,7 +497,7 @@ export default function EventDetail() {
                 ) : (
                   <Plus className="ml-2 h-4 w-4" />
                 )}
-                استيراد من جهات الاتصال
+                جهات الاتصال
               </Button>
             </div>
           </div>
@@ -534,7 +544,7 @@ export default function EventDetail() {
                 ) : filteredGuests.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-10 text-center text-gray-600">
-                      لا يوجد مدعوين — ابدأ بزر «استيراد من جهات الاتصال»
+                      لا يوجد مدعوين — ابدأ بزر «جهات الاتصال»
                     </td>
                   </tr>
                 ) : (
@@ -557,7 +567,7 @@ export default function EventDetail() {
                           {guest.name}
                         </td>
                         <td className="px-6 py-4 text-gray-600" dir="ltr">
-                          {guest.phone}
+                          {formatPhoneForDisplay(guest.phone)}
                         </td>
                         <td className="px-6 py-4">
                           <Select
@@ -692,7 +702,7 @@ export default function EventDetail() {
                   {currentSendGuest.name}
                 </p>
                 <p className="text-sm text-gray-600" dir="ltr">
-                  {currentSendGuest.phone}
+                  {formatPhoneForDisplay(currentSendGuest.phone)}
                 </p>
               </div>
 
