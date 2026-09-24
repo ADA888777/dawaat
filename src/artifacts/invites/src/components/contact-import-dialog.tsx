@@ -204,18 +204,20 @@ export function ContactImportDialog({
     setStaged(rows);
     setError(null);
 
+    // علامة RLM بعد الأسماء اللاتينية (VCF/CSV) تمنع انقلاب ترتيب الأرقام في النص العربي
+    const label = sourceLabel + "\u200F";
     const messages: string[] = [
       added === 0
-        ? "كل الأرقام في " + sourceLabel + " موجودة في القائمة مسبقاً"
-        : "قرأنا " + added + " من " + sourceLabel,
+        ? "كل الأرقام في " + label + " موجودة في القائمة مسبقاً"
+        : "قرأنا " + added + " جهة اتصال من " + label,
     ];
     if (added > 0 && duplicatesInSource > 0) {
-      messages.push("حُذف " + duplicatesInSource + " رقم مكرر");
+      messages.push("حذفنا المكرر: " + duplicatesInSource);
     }
     if (invitedBefore > 0) {
-      messages.push(invitedBefore + " مدعوون مسبقاً وتُركوا بلا تحديد");
+      messages.push("مدعوون مسبقاً (بلا تحديد): " + invitedBefore);
     }
-    setNotice(messages.join(" — "));
+    setNotice(messages.join("\u200F — "));
     scrollToReview();
   };
 
