@@ -15,6 +15,12 @@
  */
 
 import Papa from "papaparse";
+import {
+  isValidPhone,
+  normalizePhone,
+  phoneMatchKey,
+  toWesternDigits,
+} from "./phone";
 
 export interface PickedContact {
   name: string;
@@ -128,37 +134,17 @@ export function isContactPickerSupported(): boolean {
 
 // ───────────────────────── توحيد الأرقام ─────────────────────────
 
-const EASTERN_DIGITS: Record<string, string> = {
-  "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
-  "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
-  "۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4",
-  "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9",
-};
+// كل التوحيد يمر عبر lib/phone.ts: الجوال السعودي يُخزَّن دائماً +9665XXXXXXXX
+export { toWesternDigits } from "./phone";
 
-/** يحوّل الأرقام العربية/الفارسية إلى أرقام لاتينية */
-export function toWesternDigits(input: string): string {
-  return String(input ?? "").replace(
-    /[\u0660-\u0669\u06F0-\u06F9]/g,
-    (d) => EASTERN_DIGITS[d] ?? d,
-  );
-}
-
-/**
- * صيغة موحّدة للتخزين: أرقام فقط، مع الإبقاء على + الدولية.
- * ‎00‎ الدولية تُحوَّل إلى ‎+‎ حتى لا يتجاوز الرقم حد 15 خانة في قاعدة البيانات.
- */
+/** الصيغة الموحّدة للتخزين — نفس normalizePhone في كل المنصة */
 export function normalizeContactPhone(raw: string): string {
-  const s = toWesternDigits(raw).trim();
-  const digits = s.replace(/\D/g, "");
-  if (!digits) return "";
-  if (s.startsWith("+")) return "+" + digits;
-  if (digits.startsWith("00")) return "+" + digits.slice(2);
-  return digits;
+  return normalizePhone(raw);
 }
 
 /** نفس تحقق قاعدة البيانات — رفض مبكر برسالة أوضح */
 export function isValidContactPhone(phone: string): boolean {
-  return /^\+?[0-9]{9,15}$/.test(phone);
+  return isValidPhone(phone);
 }
 
 /**
@@ -187,9 +173,7 @@ export function preferMobileNumber(numbers: string[]): string {
  * المراسلة نفسها لمطابقة جهات الاتصال.
  */
 export function contactPhoneKey(raw: string): string {
-  const digits = normalizeContactPhone(raw).replace(/^\+/, "");
-  if (!digits) return "";
-  return digits.length > 9 ? digits.slice(-9) : digits;
+  return phoneMatchKey(raw);
 }
 
 export function dedupeContacts(list: PickedContact[]): PickedContact[] {
@@ -409,8 +393,8 @@ export function parseVCards(raw: string): PickedContact[] {
         if (/CELL|MOBILE|IPHONE/.test(params)) score += 3;
         if (/PREF/.test(params)) score += 1;
         if (/FAX|PAGER/.test(params)) score -= 5;
-      // ترجيح إضافي عند غياب وسم النوع تماماً
-      if (looksLikeMobileNumber(phone)) score += 2;
+        // ترجيح إضافي عند غياب وسم النوع تماماً
+        if (looksLikeMobileNumber(phone)) score += 2;
         tels.push({ value: phone, score });
       }
     }

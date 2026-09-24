@@ -198,55 +198,16 @@ type QueryOpts = { query?: { enabled?: boolean; queryKey?: readonly unknown[] } 
 /** [م-8] سقف الاستيراد الجماعي في العملية الواحدة */
 export const MAX_IMPORT_ROWS = 1000;
 
-/**
- * خريطة الأرقام الشرقية (العربية والفارسية) إلى الغربية.
- * لوحة المفاتيح العربية على iPhone وAndroid تكتب ٠١٢…، وكانت
- * replace(/\D/g) تحذفها بالكامل فيصبح الرقم فارغاً و«غير صالح».
- */
-const EASTERN_DIGITS: Record<string, string> = {
-  "\u0660": "0", "\u0661": "1", "\u0662": "2", "\u0663": "3", "\u0664": "4",
-  "\u0665": "5", "\u0666": "6", "\u0667": "7", "\u0668": "8", "\u0669": "9",
-  "\u06F0": "0", "\u06F1": "1", "\u06F2": "2", "\u06F3": "3", "\u06F4": "4",
-  "\u06F5": "5", "\u06F6": "6", "\u06F7": "7", "\u06F8": "8", "\u06F9": "9",
-};
-
-/** يحوّل أي أرقام شرقية في النص إلى أرقام غربية */
-export function toWesternDigits(raw: string): string {
-  return String(raw ?? "").replace(
-    /[\u0660-\u0669\u06F0-\u06F9]/g,
-    (d) => EASTERN_DIGITS[d] ?? d,
-  );
-}
-
-/**
- * توحيد صيغة الجوال — صيغة واحدة في كل المنصة.
- * - الأرقام الشرقية تُحوَّل إلى غربية.
- * - البادئة الدولية 00 تُحوَّل إلى + حتى لا يتجاوز الرقم 15 خانة
- *   ولا يُخزَّن نفس الشخص مرتين بصيغتين مختلفتين.
- */
-export function normalizePhone(raw: string): string {
-  const trimmed = toWesternDigits(raw).trim();
-  const digits = trimmed.replace(/\D/g, "");
-  if (!digits) return "";
-  if (trimmed.startsWith("+")) return "+" + digits;
-  if (digits.startsWith("00")) return "+" + digits.slice(2);
-  return digits;
-}
-
-/**
- * مفتاح مطابقة واحد لكل رقم: آخر تسع خانات.
- * بهذا يُعتبر 0501234567 و+966501234567 و00966501234567 شخصاً واحداً،
- * وهي نفس القاعدة التي تستخدمها تطبيقات المراسلة.
- */
-export function phoneMatchKey(raw: string): string {
-  const digits = normalizePhone(raw).replace(/\D/g, "");
-  return digits.length > 9 ? digits.slice(-9) : digits;
-}
-
-/** نفس التحقق المطبّق في قاعدة البيانات — رفض مبكر برسالة أوضح */
-export function isValidPhone(phone: string): boolean {
-  return /^\+?[0-9]{9,15}$/.test(phone);
-}
+// توحيد الأرقام في مكان واحد (lib/phone.ts) — نفس قواعد قاعدة البيانات
+export {
+  toWesternDigits,
+  normalizePhone,
+  phoneMatchKey,
+  isValidPhone,
+  isSaudiMobile,
+  formatPhoneForDisplay,
+} from "./phone";
+import { normalizePhone, phoneMatchKey, isValidPhone } from "./phone";
 
 // ---------------- مفاتيح الاستعلام ----------------
 export const getGetMeQueryKey = () => ["me"] as const;
@@ -511,31 +472,35 @@ export function useBulkCreateGuests() {
         throw new Error(`لا يمكن استيراد أكثر من ${MAX_IMPORT_ROWS} مدعو دفعة واحدة`);
       }
 
-      // نظّف ووحّد الأرقام، ثم أزل التكرار داخل الملف نفسه
+      // نظّف ووحّد الأرقام (+9665XXXXXXXX)، ثم أزل التكرار داخل الدفعة نفسها
       const seen = new Set<string>();
       const rows: { event_id: number; name: string; phone: string }[] = [];
       let skipped = 0;
 
       for (const g of data.guests) {
-        const name = (g.name ?? "").trim();
         const phone = normalizePhone(g.phone ?? "");
-        if (!name || !isValidPhone(phone) || seen.has(phone)) {
+        const name = (g.name ?? "").trim() || phone;
+        const key = phoneMatchKey(phone);
+        if (!isValidPhone(phone) || !key || seen.has(key)) {
           skipped++;
           continue;
         }
-        seen.add(phone);
+        seen.add(key);
         rows.push({ event_id: eventId, name: name.slice(0, 100), phone });
       }
 
-      if (rows.length === 0) return { created: 0, skipped };
+      if (rows.length === 0) return { created: 0, skipped, ids: [] as number[] };
 
-      // [ح-3] upsert بدل insert: تكرار الاستيراد لم يعد يضاعف المدعوين.
-      // ignoreDuplicates يُبقي رد المدعو الحالي كما هو ولا يدهسه.
-      const { error } = await supabase
+      // [ح-3] upsert بدل insert: تكرار الاستيراد لا يضاعف المدعوين،
+      // و ignoreDuplicates يُبقي رد المدعو الحالي كما هو.
+      // select يعيد الصفوف المُضافة فعلاً فقط، فيكون العدد المعروض صادقاً.
+      const { data: inserted, error } = await supabase
         .from("guests")
-        .upsert(rows, { onConflict: "event_id,phone", ignoreDuplicates: true });
+        .upsert(rows, { onConflict: "event_id,phone", ignoreDuplicates: true })
+        .select("id");
       throwIf(error);
-      return { created: rows.length, skipped };
+      const ids = ((inserted ?? []) as { id: number }[]).map((r) => r.id);
+      return { created: ids.length, skipped: skipped + (rows.length - ids.length), ids };
     },
     onSuccess: (_d, vars) => invalidateGuests(qc, vars.eventId),
   });
