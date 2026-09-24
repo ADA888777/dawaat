@@ -1,0 +1,16 @@
+// نشر دعوات على Cloudflare Workers من جذر المستودع.
+// أمر النشر الافتراضي في Cloudflare هو «npx wrangler deploy» — هذا الملف يجعله
+// يبني الموقع من الشيفرة المصدرية (src) أولاً ثم ينشر الناتج، بدل مجلد site القديم.
+// مفتاح Supabase يُقرأ من متغيرات البناء: VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY
+{
+  "name": "dawaat",
+  "compatibility_date": "2026-09-01",
+  "build": {
+    "command": "[ -n \"$VITE_SUPABASE_ANON_KEY\" ] || { echo 'ERROR: add VITE_SUPABASE_ANON_KEY in Cloudflare > Settings > Builds > Variables'; exit 1; } && cd src && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/invites build"
+  },
+  "assets": {
+    "directory": "./src/artifacts/invites/dist/public",
+    "not_found_handling": "single-page-application",
+    "html_handling": "none"
+  }
+}
