@@ -436,10 +436,17 @@ export function useListGuests(eventId: number, opts?: QueryOpts) {
   });
 }
 
+/**
+ * يعيد وعداً ينتهي بعد إعادة جلب القائمة وعدّادات المناسبة معاً،
+ * فتُعاد من onSuccess حتى لا تُغلق النافذة أو تظهر رسالة النجاح قبل تحديث
+ * الأرقام في رأس الصفحة.
+ */
 function invalidateGuests(qc: ReturnType<typeof useQueryClient>, eventId: number) {
-  qc.invalidateQueries({ queryKey: getListGuestsQueryKey(eventId) });
-  qc.invalidateQueries({ queryKey: getGetEventQueryKey(eventId) });
-  qc.invalidateQueries({ queryKey: getListEventsQueryKey() });
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: getListGuestsQueryKey(eventId) }),
+    qc.invalidateQueries({ queryKey: getGetEventQueryKey(eventId) }),
+    qc.invalidateQueries({ queryKey: getListEventsQueryKey() }),
+  ]);
 }
 
 export function useCreateGuest() {

@@ -69,9 +69,27 @@ export function phoneMatchKey(raw: string): string {
   return digits.length > 9 ? digits.slice(-9) : digits;
 }
 
-/** للعرض: +966501234567 → 050 123 4567 ، وغير السعودي يبقى كما هو */
+/**
+ * للعرض فقط: +966501234567 → +966 50 123 4567
+ * التخزين يبقى +9665XXXXXXXX دون فراغات، وغير السعودي يُعرض بصيغته الموحّدة.
+ * يُعرض دائماً داخل عنصر dir="ltr" حتى لا تنقلب علامة + في الصفحات العربية.
+ */
 export function formatPhoneForDisplay(phone: string): string {
   const n = normalizePhone(phone);
   const m = n.match(/^\+966(5\d)(\d{3})(\d{4})$/);
-  return m ? `0${m[1]} ${m[2]} ${m[3]}` : n || phone;
+  return m ? `+966 ${m[1]} ${m[2]} ${m[3]}` : n || phone;
+}
+
+/**
+ * هل «الاسم» مجرد رقم؟ (يحدث عندما يُستورد رقم بلا اسم فيُستخدم الرقم مكانه)
+ * أرقام لاتينية أو عربية مع + ( ) - . والفراغات فقط، وفيه خانة واحدة على الأقل.
+ */
+export function isPhoneLikeName(name: string): boolean {
+  const v = toWesternDigits(String(name ?? "")).trim();
+  return /\d/.test(v) && /^[+\d\s().\-]+$/.test(v);
+}
+
+/** اسم المدعو للعرض: إن كان الاسم رقماً يُعرض بنفس صيغة أرقام الجوال */
+export function formatGuestNameForDisplay(name: string): string {
+  return isPhoneLikeName(name) ? formatPhoneForDisplay(name) : name;
 }

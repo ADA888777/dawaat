@@ -16,6 +16,7 @@
 
 import Papa from "papaparse";
 import {
+  isPhoneLikeName,
   isValidPhone,
   normalizePhone,
   phoneMatchKey,
@@ -182,8 +183,9 @@ export function dedupeContacts(list: PickedContact[]): PickedContact[] {
 
 /**
  * يدمج دفعة جديدة في قائمة قائمة بلا تكرار.
- * تُحفظ أول صيغة وصلت للرقم، ويفوز الاسم الأوضح لأن الرقم قد يكون
- * استُخدم اسماً مؤقتاً في المصدر الأول.
+ * أول سجل للرقم هو الأصل: تُحفظ صيغته واسمه كما هما، ولا يُستبدل اسمه
+ * إلا إذا كان فارغاً أو مجرد رقم (استُخدم الرقم اسماً مؤقتاً).
+ * لا يُستبدل الاسم الأصلي باسم أطول ولا يُضاف له أي وسم.
  */
 export function mergeContacts(
   base: PickedContact[],
@@ -208,8 +210,11 @@ export function mergeContacts(
     }
 
     const current = out[at];
-    const currentIsPlaceholder = current.name === current.phone;
-    if (name && (currentIsPlaceholder || name.length > current.name.length)) {
+    const currentIsPlaceholder =
+      !current.name.trim() ||
+      current.name === current.phone ||
+      isPhoneLikeName(current.name);
+    if (currentIsPlaceholder && name && !isPhoneLikeName(name)) {
       out[at] = { name, phone: current.phone };
     }
   }
