@@ -152,21 +152,21 @@ begin
 
   reset role;
   select count(*) into v_cnt from public.guests
-   where phone = '0509999999';
+   where phone = '+966509999999';  -- [0005] يُخزَّن بالصيغة الموحّدة
   if v_cnt <> 1 then raise exception 'فشل 9: % صف بدل 1 بعد ردّين', v_cnt; end if;
 
-  select attendance_status into v_status from public.guests where phone = '0509999999';
+  select attendance_status into v_status from public.guests where phone = '+966509999999';
   if v_status <> 'declined' then raise exception 'فشل 9ب: الحالة % بدل declined', v_status; end if;
   raise notice '✅ 9: upsert الردود ذرّي — صف واحد بالحالة الأخيرة';
 
   -- =================================================================
   -- اختبار 10 [ح-2]: الرد بالرمز يعمل دون تمرير الجوال
   -- =================================================================
-  select invite_token into v_token from public.guests where phone = '0500000001';
+  select invite_token into v_token from public.guests where phone = '+966500000001';
   set local role anon;
   perform public.submit_rsvp_by_token(v_token, 'attending');
   reset role;
-  select attendance_status into v_status from public.guests where phone = '0500000001';
+  select attendance_status into v_status from public.guests where phone = '+966500000001';
   if v_status <> 'attending' then raise exception 'فشل 10: الرمز لم يسجّل الرد'; end if;
 
   -- ورمز عشوائي يُرفض
@@ -239,6 +239,66 @@ begin
     raise exception 'فشل 14: % سياسة تُقيّم auth.uid()/is_admin() لكل صف', v_cnt;
   end if;
   raise notice '✅ 14: كل سياسات public ملفوفة بـ (select ...) — تقييم مرة واحدة';
+
+  -- =================================================================
+  -- اختبار 15 [0005]: توحيد أرقام الجوال ومنع تكرار الشخص نفسه بصيغة أخرى
+  -- =================================================================
+  reset role;
+  if public.normalize_sa_phone('050 123 4567')   <> '+966501234567'
+  or public.normalize_sa_phone('00966501234567') <> '+966501234567'
+  or public.normalize_sa_phone('٠٥٠١٢٣٤٥٦٧')     <> '+966501234567'
+  or public.normalize_sa_phone('501234567')      <> '+966501234567'
+  or public.normalize_sa_phone('(050) 123-4567') <> '+966501234567' then
+    raise exception 'فشل 15: normalize_sa_phone لا يوحّد الصيغ السعودية';
+  end if;
+
+  select count(*) into v_cnt from public.guests
+   where phone !~ '^\+9665[0-9]{8}$';
+  if v_cnt <> 0 then raise exception 'فشل 15ب: % رقم مخزّن بغير الصيغة +9665XXXXXXXX', v_cnt; end if;
+
+  -- بوب يضيف نفس مدعوه بصيغة مختلفة → يجب أن يرفضه القيد
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  begin
+    insert into public.guests (event_id, name, phone)
+    select id, 'نفس الشخص', '+966 50 000 0002' from public.events where title = 'زفاف بوب';
+    raise exception 'فشل 15ج: قُبل نفس الرقم بصيغة مختلفة!';
+  exception when unique_violation then null;
+  end;
+  reset role;
+  raise notice '✅ 15: الأرقام موحّدة +9665XXXXXXXX والتكرار بصيغة أخرى مرفوض';
+
+  -- =================================================================
+  -- اختبار 16 [0003a]: إعدادات النظام — قراءة للجميع وتعديل للأدمن فقط
+  -- =================================================================
+  set local role anon;
+  select count(*) into v_cnt from public.app_settings;
+  if v_cnt <> 1 then raise exception 'فشل 16: الزائر يرى % صف إعدادات بدل 1', v_cnt; end if;
+
+  -- مستخدم عادي لا يستطيع التعديل (RLS تُسقط الصف بصمت)
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  update public.app_settings set site_name = 'اختراق';
+  reset role;
+  select count(*) into v_cnt from public.app_settings where site_name = 'اختراق';
+  if v_cnt <> 0 then raise exception 'فشل 16ب: مستخدم عادي عدّل إعدادات النظام!'; end if;
+
+  -- ولا إضافة صف ثانٍ
+  set local role authenticated;
+  begin
+    insert into public.app_settings (id) values (false);
+    raise exception 'فشل 16ج: أُضيف صف إعدادات ثانٍ!';
+  exception when others then
+    if sqlerrm like 'فشل 16%' then raise; end if;
+  end;
+
+  -- الأدمن يعدّل
+  perform set_config('request.jwt.claim.sub','33333333-3333-3333-3333-333333333333', true);
+  update public.app_settings set support_snapchat = 'dawaat_test';
+  reset role;
+  select count(*) into v_cnt from public.app_settings where support_snapchat = 'dawaat_test';
+  if v_cnt <> 1 then raise exception 'فشل 16د: الأدمن لم يستطع تعديل الإعدادات'; end if;
+  raise notice '✅ 16: app_settings — قراءة للجميع، تعديل للأدمن فقط، صف واحد';
 
   raise notice '';
   raise notice '════════════════════════════════';
