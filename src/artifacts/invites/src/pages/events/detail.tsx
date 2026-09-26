@@ -14,6 +14,7 @@ import {
   formatPhoneForDisplay,
   type Guest,
 } from "@/lib/api";
+import { formatGuestNameForDisplay, isPhoneLikeName } from "@/lib/phone";
 import { useParams, Link } from "wouter";
 import {
   Loader2,
@@ -403,6 +404,9 @@ export default function EventDetail() {
     );
   }
 
+  // العدد من قائمة المدعوين نفسها (تتحدّث فور الإضافة/الحذف) حتى يطابق الجدول دائماً،
+  // وعدد الـ view يبقى احتياطاً إلى أن تُحمَّل القائمة.
+  const guestsTotal = guests ? guests.length : event.guestsCount;
   const awaitingSend = (guests ?? []).filter(
     (g) => getGuestDisplayStatus(g, event.eventDate) === "pending",
   ).length;
@@ -421,7 +425,7 @@ export default function EventDetail() {
           <div>
             <h1 className="mb-2 text-3xl font-bold text-gray-900">{event.title}</h1>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
-              <span>المدعوين: {event.guestsCount}</span>
+              <span>المدعوين: {guestsTotal}</span>
               <span className="text-gray-500">بانتظار الإرسال: {awaitingSend}</span>
               <span className="text-indigo-600">تم الإرسال: {event.sentCount}</span>
               <span className="text-emerald-600">مؤكد: {event.attendingCount}</span>
@@ -564,7 +568,11 @@ export default function EventDetail() {
                           />
                         </td>
                         <td className="px-6 py-4 font-medium text-gray-900">
-                          {guest.name}
+                          {isPhoneLikeName(guest.name) ? (
+                            <span dir="ltr">{formatGuestNameForDisplay(guest.name)}</span>
+                          ) : (
+                            guest.name
+                          )}
                         </td>
                         <td className="px-6 py-4 text-gray-600" dir="ltr">
                           {formatPhoneForDisplay(guest.phone)}
@@ -699,7 +707,11 @@ export default function EventDetail() {
             <div className="space-y-4">
               <div className="rounded-lg border border-gray-200 p-4">
                 <p className="text-sm font-semibold text-gray-900">
-                  {currentSendGuest.name}
+                  {isPhoneLikeName(currentSendGuest.name) ? (
+                    <span dir="ltr">{formatGuestNameForDisplay(currentSendGuest.name)}</span>
+                  ) : (
+                    currentSendGuest.name
+                  )}
                 </p>
                 <p className="text-sm text-gray-600" dir="ltr">
                   {formatPhoneForDisplay(currentSendGuest.phone)}
