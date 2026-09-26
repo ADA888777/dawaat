@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# الشيفرة كلها داخل src/ — كل الأوامر تعمل من هناك
+defaults:
+  run:
+    working-directory: src
+
+jobs:
+  build:
+    name: فحص الأنواع والبناء
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: src/pnpm-lock.yaml
+
+      # --frozen-lockfile يضمن أن ملف القفل مطابق لـ package.json
+      # ويحترم minimumReleaseAge المضبوط في pnpm-workspace.yaml
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run typecheck
+
+      - name: البناء
+        run: pnpm run build
+        env:
+          PORT: '5000'
+          BASE_PATH: /
+
+      - name: تدقيق ثغرات الاعتماديات
+        run: pnpm audit --prod
+
+  rls:
+    name: اختبارات أمان قاعدة البيانات
+    runs-on: ubuntu-latest
+
+    # الحماية الحقيقية للبيانات مفروضة في قاعدة البيانات لا في الواجهة،
+    # لذا نختبر سياسات RLS فعلياً على Postgres في كل تغيير:
+    # المخطط الأساسي + كل الهجرات بالترتيب = نفس بنية قاعدة البيانات الحية.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DB: postgresql://postgres:postgres@localhost:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: تثبيت عميل psql
+        working-directory: .
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: تجهيز بيئة تحاكي Supabase
+        run: psql "$DB" -v ON_ERROR_STOP=1 -f supabase/tests/supabase_stub.sql
+
+      - name: تطبيق المخطط وكل الهجرات بالترتيب
+        run: |
+          psql "$DB" -v ON_ERROR_STOP=1 -f supabase/schema.sql
+          for f in supabase/migrations/*.sql; do
+            echo "::group::$f"
+            psql "$DB" -v ON_ERROR_STOP=1 -f "$f"
+            echo "::endgroup::"
+          done
+
+      # كل هجرة يجب أن تكون آمنة لإعادة التنفيذ على قاعدة فيها بيانات
+      - name: إعادة تنفيذ الهجرات (idempotent)
+        run: |
+          for f in supabase/migrations/*.sql; do
+            psql "$DB" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: تشغيل اختبارات RLS
+        run: psql "$DB" -v ON_ERROR_STOP=1 -f supabase/tests/rls_tests.sql
