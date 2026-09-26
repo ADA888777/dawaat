@@ -758,11 +758,12 @@ export function ContactImportDialog({
                     aria-label={"تحديد " + row.name}
                   />
                   <div className="min-w-0 flex-1">
-                    <p
-                      className="truncate font-medium text-gray-900"
-                      dir={isPhoneLikeName(row.name) ? "ltr" : undefined}
-                    >
-                      {formatGuestNameForDisplay(row.name)}
+                    <p className="truncate font-medium text-gray-900">
+                      {isPhoneLikeName(row.name) ? (
+                        <span dir="ltr">{formatGuestNameForDisplay(row.name)}</span>
+                      ) : (
+                        row.name
+                      )}
                     </p>
                     {row.alreadyInvited ? (
                       <span className="text-[11px] text-amber-700">
