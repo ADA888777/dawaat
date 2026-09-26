@@ -1,0 +1,51 @@
+# مستودع دعوات — الشيفرة داخل src/ والنشر يبني منها مباشرة (wrangler.jsonc)
+
+# مخرجات البناء
+dist
+tmp
+out-tsc
+*.tsbuildinfo
+.wrangler/
+
+# الاعتماديات
+node_modules
+
+# أسرار ومتغيرات البيئة المحلية
+.env
+.env.*
+!.env.example
+.dev.vars
+
+# المحررات
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# سجلات وملفات النظام
+npm-debug.log
+yarn-error.log
+pnpm-debug.log*
+/coverage
+.DS_Store
+Thumbs.db
+
+# Replit
+.cache/
+.local/
+
+# مخرجات مؤقتة من وكيل Replit — public/templates هي المصدر الوحيد للقوالب
+src/attached_assets/generated_images/
+
+# نسخ مضغوطة ومبنية لا تُرفع للمستودع
+*.tar.gz
+*.zip
+/site/
