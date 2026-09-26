@@ -38,7 +38,12 @@ import {
   pickContacts,
   type PickedContact,
 } from "@/lib/contact-picker";
-import { formatPhoneForDisplay, isSaudiMobile } from "@/lib/phone";
+import {
+  formatGuestNameForDisplay,
+  formatPhoneForDisplay,
+  isPhoneLikeName,
+  isSaudiMobile,
+} from "@/lib/phone";
 
 interface ContactImportDialogProps {
   open: boolean;
@@ -753,7 +758,12 @@ export function ContactImportDialog({
                     aria-label={"تحديد " + row.name}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-gray-900">{row.name}</p>
+                    <p
+                      className="truncate font-medium text-gray-900"
+                      dir={isPhoneLikeName(row.name) ? "ltr" : undefined}
+                    >
+                      {formatGuestNameForDisplay(row.name)}
+                    </p>
                     {row.alreadyInvited ? (
                       <span className="text-[11px] text-amber-700">
                         مدعو مسبقاً في هذه المناسبة
