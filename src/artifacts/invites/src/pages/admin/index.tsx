@@ -1,24 +1,62 @@
 import { AppLayout } from "@/components/layout/app-layout";
-import { useGetMe, useGetAdminStats, useListAdminUsers, useListAdminEvents, useListTemplates, useCreateTemplate, useUpdateTemplate, useDeleteTemplate, useUpdateAdminUser, useDeleteAdminEvent } from "@/lib/api";
+import { useGetMe, useGetAdminStats, useListAdminEvents, useListTemplates, useCreateTemplate, useUpdateTemplate, useDeleteTemplate, useDeleteAdminEvent, useGetAppSettings, useListAdminPayments } from "@/lib/api";
+import AdminSettings, { type AdminCardId } from "../settings/admin";
+import { AnnouncementsCard } from "../settings/announcements-card";
+import { FeaturesCard } from "./features-card";
+import { UsageReports } from "./reports";
+import { AdminGuests } from "./guests";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { AdminPayments } from "./payments";
-import { Link, Redirect } from "wouter";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Users, Calendar, Palette, Crown, Trash2, Edit, Plus } from "lucide-react";
+import { Link, Redirect, useLocation, useParams } from "wouter";
+import { Loader2, Users, Calendar, Palette, Crown, Trash2, Edit, Plus, BarChart3, Banknote, ListChecks, Megaphone, Mail, ScrollText, ToggleLeft, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useQueryClient } from "@tanstack/react-query";
-import { getListTemplatesQueryKey, getListAdminUsersQueryKey, getListAdminEventsQueryKey, getGetAdminStatsQueryKey } from "@/lib/api";
+import { getListTemplatesQueryKey, getListAdminEventsQueryKey, getGetAdminStatsQueryKey } from "@/lib/api";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 
+
+/** أقسام لوحة التحكم — كل قسم محمي في قاعدة البيانات (RLS/دوال تتحقق من الأدمن) */
+const SECTIONS = [
+  { id: "overview", label: "نظرة عامة", icon: BarChart3 },
+  { id: "users", label: "المستخدمون والاشتراكات", icon: Users },
+  { id: "plans", label: "الباقات والرسوم", icon: Crown },
+  { id: "payments", label: "المدفوعات", icon: Banknote },
+  { id: "events", label: "المناسبات", icon: Calendar },
+  { id: "guests", label: "المدعوون", icon: ListChecks },
+  { id: "templates", label: "القوالب والثيمات", icon: Palette },
+  { id: "announcements", label: "الإعلانات", icon: Megaphone },
+  { id: "contact", label: "بيانات التواصل", icon: Mail },
+  { id: "content", label: "السياسات والمحتوى", icon: ScrollText },
+  { id: "features", label: "الميزات", icon: ToggleLeft },
+  { id: "site", label: "إعدادات الموقع", icon: Globe },
+] as const;
+
+type SectionId = (typeof SECTIONS)[number]["id"];
+
+/** ما يعرضه كل قسم من بطاقات صفحة الإعدادات الإدارية */
+const SECTION_CARDS: Partial<Record<SectionId, AdminCardId[]>> = {
+  users: ["users"],
+  plans: ["plans", "send-fee"],
+  contact: ["support"],
+  content: ["content", "invites"],
+  site: ["site", "notifications"],
+};
+
 export default function AdminPage() {
   const { data: user, isLoading: isLoadingUser } = useGetMe();
+  const params = useParams<{ section?: string }>();
+  const [, navigate] = useLocation();
+  const section: SectionId = (SECTIONS.find((s) => s.id === params.section)?.id ?? "overview") as SectionId;
   const { data: stats, isLoading: isLoadingStats } = useGetAdminStats({ query: { enabled: user?.role === 'admin', queryKey: getGetAdminStatsQueryKey() } });
-  
+  const { data: settings } = useGetAppSettings();
+  const { data: payments } = useListAdminPayments();
+  const awaitingPayments = (payments ?? []).filter((p) => p.status === "submitted").length;
+
   if (isLoadingUser) {
     return <AppLayout><div className="flex justify-center py-32"><Loader2 className="w-8 h-8 animate-spin text-gold" /></div></AppLayout>;
   }
@@ -27,58 +65,105 @@ export default function AdminPage() {
     return <Redirect to="/dashboard" />;
   }
 
+  const cards = SECTION_CARDS[section];
+  const current = SECTIONS.find((s) => s.id === section)!;
+
   return (
     <AppLayout>
-      <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
+      <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">لوحة تحكم الإدارة</h1>
-          <p className="text-gray-600 mt-1">إدارة المستخدمين، القوالب، والمناسبات في المنصة</p>
+          <p className="text-gray-600 mt-1">إدارة كاملة للمنصة: المستخدمون والباقات والمدفوعات والمناسبات والقوالب والإعلانات والمحتوى والإعدادات</p>
         </div>
 
-        {isLoadingStats ? (
-          <div className="flex justify-center py-10"><Loader2 className="w-8 h-8 animate-spin text-gold" /></div>
-        ) : stats ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
-              <Users className="w-8 h-8 text-blue-500 mb-2" />
-              <p className="text-sm text-gray-600 font-medium">المستخدمين</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.usersCount}</p>
-            </div>
-            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
-              <Crown className="w-8 h-8 text-gold mb-2" />
-              <p className="text-sm text-gray-600 font-medium">الاشتراكات المدفوعة</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.paidPlanCount}</p>
-            </div>
-            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
-              <Calendar className="w-8 h-8 text-emerald-500 mb-2" />
-              <p className="text-sm text-gray-600 font-medium">المناسبات</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.eventsCount}</p>
-            </div>
-            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
-              <Palette className="w-8 h-8 text-purple-500 mb-2" />
-              <p className="text-sm text-gray-600 font-medium">القوالب</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.templatesCount}</p>
-            </div>
-          </div>
-        ) : null}
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          {/* قائمة الأقسام */}
+          <nav
+            aria-label="أقسام لوحة التحكم"
+            className="flex gap-1 overflow-x-auto rounded-xl border border-gray-100 bg-white p-2 lg:w-60 lg:shrink-0 lg:flex-col lg:overflow-visible"
+          >
+            {SECTIONS.map((s) => {
+              const Icon = s.icon;
+              const active = s.id === section;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => navigate("/admin/" + s.id)}
+                  aria-current={active ? "page" : undefined}
+                  data-testid={"admin-nav-" + s.id}
+                  className={
+                    "flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors " +
+                    (active ? "bg-ink text-gold-light" : "text-gray-700 hover:bg-cream-2")
+                  }
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="whitespace-nowrap">{s.label}</span>
+                  {s.id === "payments" && awaitingPayments > 0 && (
+                    <span className="mr-auto rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-black">{awaitingPayments}</span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
 
-        <Tabs defaultValue="templates" className="w-full">
-          <TabsList className="grid grid-cols-4 max-w-3xl bg-white border border-gray-100">
-            <TabsTrigger value="templates">القوالب</TabsTrigger>
-            <TabsTrigger value="users">المستخدمين</TabsTrigger>
-            <TabsTrigger value="events">المناسبات</TabsTrigger>
-            <TabsTrigger value="payments">المدفوعات</TabsTrigger>
-          </TabsList>
-          
-          <div className="mt-6 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <TabsContent value="templates"><AdminTemplates /></TabsContent>
-            <TabsContent value="users"><AdminUsers /></TabsContent>
-            <TabsContent value="events"><AdminEvents /></TabsContent>
-            <TabsContent value="payments"><AdminPayments /></TabsContent>
+          {/* محتوى القسم */}
+          <div className="min-w-0 flex-1 space-y-6" data-testid={"admin-section-" + section}>
+            {section === "overview" && (
+              <>
+                {isLoadingStats ? (
+                  <div className="flex justify-center py-10"><Loader2 className="w-8 h-8 animate-spin text-gold" /></div>
+                ) : stats ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <StatTile icon={<Users className="w-8 h-8 text-blue-500 mb-2" />} label="المستخدمين" value={stats.usersCount} />
+                    <StatTile icon={<Crown className="w-8 h-8 text-gold mb-2" />} label="الاشتراكات المدفوعة" value={stats.paidPlanCount} />
+                    <StatTile icon={<Calendar className="w-8 h-8 text-emerald-500 mb-2" />} label="المناسبات" value={stats.eventsCount} />
+                    <StatTile icon={<Palette className="w-8 h-8 text-purple-500 mb-2" />} label="القوالب" value={stats.templatesCount} />
+                  </div>
+                ) : null}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                  <UsageReports />
+                </div>
+              </>
+            )}
+
+            {cards && user && (
+              <AdminSettings me={user} only={cards} embedded />
+            )}
+
+            {section === "payments" && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"><AdminPayments /></div>
+            )}
+            {section === "events" && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"><AdminEvents /></div>
+            )}
+            {section === "guests" && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"><AdminGuests /></div>
+            )}
+            {section === "templates" && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"><AdminTemplates /></div>
+            )}
+            {section === "announcements" && settings && (
+              <AnnouncementsCard settings={settings} />
+            )}
+            {section === "features" && settings && (
+              <FeaturesCard settings={settings} />
+            )}
+            <p className="sr-only">{current.label}</p>
           </div>
-        </Tabs>
+        </div>
       </div>
     </AppLayout>
+  );
+}
+
+function StatTile({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+  return (
+    <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
+      {icon}
+      <p className="text-sm text-gray-600 font-medium">{label}</p>
+      <p className="text-2xl font-bold text-gray-900">{value}</p>
+    </div>
   );
 }
 
@@ -241,76 +326,6 @@ function AdminTemplates() {
         isPending={deleteTemplate.isPending}
         onConfirm={confirmDeleteTemplate}
       />
-    </div>
-  );
-}
-
-function AdminUsers() {
-  const { data: users, isLoading } = useListAdminUsers();
-  const updateUser = useUpdateAdminUser();
-  const queryClient = useQueryClient();
-
-  const handleRoleChange = (id: string, role: 'user' | 'admin') => {
-    updateUser.mutate({ id, data: { role } }, {
-      onSuccess: () => queryClient.invalidateQueries({ queryKey: getListAdminUsersQueryKey() })
-    });
-  };
-
-  const handlePlanChange = (id: string, plan: 'free' | 'paid') => {
-    updateUser.mutate({ id, data: { plan } }, {
-      onSuccess: () => queryClient.invalidateQueries({ queryKey: getListAdminUsersQueryKey() })
-    });
-  };
-
-  return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-900">إدارة المستخدمين</h2>
-      
-      <div className="overflow-x-auto">
-        <table className="w-full text-right text-sm">
-          <thead className="bg-gray-50 text-gray-600 font-medium">
-            <tr>
-              <th className="px-4 py-3">الاسم / البريد</th>
-              <th className="px-4 py-3">تاريخ التسجيل</th>
-              <th className="px-4 py-3">الصلاحية</th>
-              <th className="px-4 py-3">الباقة</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {isLoading ? (
-              <tr><td colSpan={4} className="px-4 py-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-            ) : users?.map(u => (
-              <tr key={u.id}>
-                <td className="px-4 py-3">
-                  <p className="font-medium text-gray-900">{u.name}</p>
-                  <p className="text-xs text-gray-600" dir="ltr">{u.email}</p>
-                </td>
-                <td className="px-4 py-3 text-gray-600">{format(new Date(u.createdAt), 'yyyy/MM/dd')}</td>
-                <td className="px-4 py-3">
-                  <Select value={u.role} onValueChange={(val: any) => handleRoleChange(u.id, val)}>
-                    <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent dir="rtl">
-                      <SelectItem value="user">مستخدم</SelectItem>
-                      <SelectItem value="admin">مدير</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </td>
-                <td className="px-4 py-3">
-                  <Select value={u.plan} onValueChange={(val: any) => handlePlanChange(u.id, val)}>
-                    <SelectTrigger className={`h-8 w-28 text-xs ${u.plan === 'paid' ? 'bg-gold/10 text-yellow-800 border-gold/50' : ''}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent dir="rtl">
-                      <SelectItem value="free">أساسية</SelectItem>
-                      <SelectItem value="paid">ماسية (Pro)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
