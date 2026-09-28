@@ -48,6 +48,7 @@ src/supabase/migrations/0003_guest_invite_flow.sql
 src/supabase/migrations/0003a_create_app_settings.sql
 src/supabase/migrations/0004_contact_info_settings.sql
 src/supabase/migrations/0005_normalize_guest_phones.sql
+src/supabase/migrations/0006_send_fee_payments.sql
 ```
 
 كل الهجرات آمنة لإعادة التنفيذ على المشروع الحالي (لا تحذف بيانات ولا سياسات).
@@ -55,6 +56,20 @@ src/supabase/migrations/0005_normalize_guest_phones.sql
 
 أرقام جوال المدعوين تُخزَّن دائماً بالصيغة `+9665XXXXXXXX` (دالة `normalize_sa_phone`
 وتريجر `guests_normalize_phone` من 0005)، وتُعرض في الواجهة بالصيغة `+966 5X XXX XXXX`.
+
+### رسوم الإرسال (الدفع قبل الإرسال النهائي) — الهجرة 0006
+
+- الأدمن يحدد المبلغ وبيانات التحويل البنكي من **الإعدادات ← رسوم إرسال الدعوات**.
+  مبلغ `0` = الإرسال مجاني بلا شاشة دفع.
+- عند الضغط على «إرسال الدعوات» تظهر شاشة الدفع: المبلغ ← التحويل البنكي ← رفع
+  إثبات التحويل ← الحالة «بانتظار مراجعة الإدارة». الأدمن يوافق أو يرفض من
+  **لوحة التحكم ← المدفوعات**، وبعد الموافقة فقط يُفتح الإرسال (ورمز QR ونسخ الروابط).
+- الحماية في قاعدة البيانات: `mark_guests_invite_status` ترفض بـ `PAYMENT_REQUIRED`
+  ما لم توجد عملية `paid` للمناسبة (جدول `event_payments`: المستخدم، المناسبة،
+  المبلغ، الحالة، وقت الدفع، رقم العملية، حالة الإرسال). الإثباتات في bucket خاص
+  `payment-proofs` تُعرض بروابط موقّتة للمالك والأدمن فقط.
+- بوابة الدفع الإلكترونية غير مربوطة بعد؛ الأعمدة `method`/`provider`/`provider_ref`
+  محجوزة لربطها لاحقاً بنفس التدفق والحالات دون تغيير الواجهة.
 
 ---
 
