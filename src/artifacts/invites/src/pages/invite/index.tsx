@@ -4,6 +4,7 @@ import {
   getGetPublicInvitationQueryKey,
   useGetPublicInvitation,
   useSubmitRsvp,
+  useFeature,
   useGetGuestByToken,
   useSubmitRsvpByToken,
 useGetAppSettings,
@@ -50,6 +51,7 @@ export default function PublicInvite() {
   const { data: invite, isLoading, isError } = useGetPublicInvitation(slug!, { query: { enabled: !!slug, queryKey: getGetPublicInvitationQueryKey(slug!) } });
   const { data: tokenGuest, isLoading: isLoadingGuest } = useGetGuestByToken(inviteToken);
   const submitRsvp = useSubmitRsvp();
+  const rsvpEnabled = useFeature("public_rsvp");
   const submitByToken = useSubmitRsvpByToken();
   // إعدادات الموقع تُقرأ للزائر أيضاً: نص أسفل الدعوة، واسم الموقع،
   // وسياسة الوسائل المسموح إظهارها للمدعو.
@@ -309,7 +311,11 @@ export default function PublicInvite() {
             </div>
 
             <div className="pt-8 border-t border-white/10">
-              {isSubmitted ? (
+              {!rsvpEnabled ? (
+                <p className="text-center text-sm text-gray-400 font-sans">
+                  تسجيل الردود متوقف حالياً — تواصل مع صاحب الدعوة مباشرة.
+                </p>
+              ) : isSubmitted ? (
                 <div className="text-center bg-emerald-900/20 border border-emerald-500/30 rounded-xl p-8">
                   <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 text-emerald-400">
                     <Check className="w-8 h-8" />
