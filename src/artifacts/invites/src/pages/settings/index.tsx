@@ -46,7 +46,7 @@ export default function SettingsPage() {
 
   return (
     <Suspense fallback={<SettingsLoader />}>
-      {me.role === "admin" ? <AdminSettings me={me} /> : <UserSettings me={me} />}
+      {me.role === "admin" ? <AdminSettings me={me} only={["profile", "security", "session"]} /> : <UserSettings me={me} />}
     </Suspense>
   );
 }

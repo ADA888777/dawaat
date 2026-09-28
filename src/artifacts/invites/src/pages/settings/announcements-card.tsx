@@ -6,6 +6,8 @@ import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
+  AUDIENCE_LABELS,
+  announcementState,
   useCreateAnnouncement,
   useDeleteAnnouncement,
   useListAnnouncements,
@@ -13,9 +15,36 @@ import {
   useUpdateAnnouncement,
   useUpdateAppSettings,
   type Announcement,
+  type AnnouncementAudience,
   type AppSettings,
 } from "@/lib/api";
 import { FieldRow, SaveBar, SelectInput, SettingsCard, ToggleRow } from "./parts";
+
+const AUDIENCE_OPTIONS = (Object.keys(AUDIENCE_LABELS) as AnnouncementAudience[]).map((value) => ({
+  value,
+  label: AUDIENCE_LABELS[value],
+}));
+
+const STATE_LABELS = {
+  live: { label: "ظاهر الآن", cls: "bg-emerald-100 text-emerald-800" },
+  scheduled: { label: "مجدول", cls: "bg-blue-100 text-blue-800" },
+  expired: { label: "منتهٍ", cls: "bg-gray-200 text-gray-700" },
+  disabled: { label: "معطّل", cls: "bg-gray-100 text-gray-500" },
+} as const;
+
+/** ISO ↔ قيمة حقل datetime-local بالتوقيت المحلي */
+function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInput(value: string): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
 
 const SPEED_OPTIONS = [
   { value: "30", label: "بطيء" },
@@ -42,7 +71,11 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
   const [speed, setSpeed] = useState(String(settings.tickerSpeed));
   const [newText, setNewText] = useState("");
   const [newLink, setNewLink] = useState("");
-  const [drafts, setDrafts] = useState<Record<number, { text: string; link: string }>>({});
+  type Draft = { text: string; link: string; startsAt: string; endsAt: string; priority: string };
+  const [drafts, setDrafts] = useState<Record<number, Draft>>({});
+  const [newAudience, setNewAudience] = useState<AnnouncementAudience>("all");
+  const [newStarts, setNewStarts] = useState("");
+  const [newEnds, setNewEnds] = useState("");
   const [toDelete, setToDelete] = useState<Announcement | null>(null);
 
   useEffect(() => {
@@ -68,32 +101,72 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
     const text = newText.trim();
     if (!text) return;
     const maxOrder = list.reduce((m, a) => Math.max(m, a.sortOrder), 0);
+    const startsAt = fromLocalInput(newStarts);
+    const endsAt = fromLocalInput(newEnds);
+    if (startsAt && endsAt && endsAt < startsAt) {
+      toast({ title: "تاريخ النهاية قبل البداية", variant: "destructive" });
+      return;
+    }
     createAnnouncement.mutate(
-      { text, link: newLink.trim(), active: true, sortOrder: maxOrder + 1 },
+      { text, link: newLink.trim(), active: true, sortOrder: maxOrder + 1, startsAt, endsAt, audience: newAudience },
       {
         onSuccess: () => {
           setNewText("");
           setNewLink("");
-          toast({ title: "أُضيف الإعلان وهو ظاهر الآن" });
+          setNewStarts("");
+          setNewEnds("");
+          setNewAudience("all");
+          toast({ title: startsAt && startsAt > new Date().toISOString() ? "أُضيف الإعلان وسيظهر في موعده" : "أُضيف الإعلان" });
         },
         onError: fail("تعذّر إضافة الإعلان"),
       },
     );
   };
 
-  const draftOf = (a: Announcement) => drafts[a.id] ?? { text: a.text, link: a.link };
-  const setDraft = (a: Announcement, patch: Partial<{ text: string; link: string }>) =>
+  const baseDraft = (a: Announcement): Draft => ({
+    text: a.text,
+    link: a.link,
+    startsAt: toLocalInput(a.startsAt),
+    endsAt: toLocalInput(a.endsAt),
+    priority: String(a.sortOrder),
+  });
+  const draftOf = (a: Announcement) => drafts[a.id] ?? baseDraft(a);
+  const setDraft = (a: Announcement, patch: Partial<Draft>) =>
     setDrafts((prev) => ({ ...prev, [a.id]: { ...draftOf(a), ...patch } }));
+  const isDirty = (a: Announcement) => {
+    const d = draftOf(a);
+    const b = baseDraft(a);
+    return (
+      d.text.trim() !== b.text || d.link.trim() !== b.link ||
+      d.startsAt !== b.startsAt || d.endsAt !== b.endsAt || d.priority !== b.priority
+    );
+  };
 
   const saveText = (a: Announcement) => {
     const d = draftOf(a);
-    if (d.text.trim() === a.text && d.link.trim() === a.link) return;
+    if (!isDirty(a)) return;
     if (!d.text.trim()) {
       toast({ title: "نص الإعلان لا يمكن أن يكون فارغاً", variant: "destructive" });
       return;
     }
+    const startsAt = fromLocalInput(d.startsAt);
+    const endsAt = fromLocalInput(d.endsAt);
+    if (startsAt && endsAt && endsAt < startsAt) {
+      toast({ title: "تاريخ النهاية قبل البداية", variant: "destructive" });
+      return;
+    }
+    const priority = Number(d.priority);
     updateAnnouncement.mutate(
-      { id: a.id, data: { text: d.text, link: d.link } },
+      {
+        id: a.id,
+        data: {
+          text: d.text,
+          link: d.link,
+          startsAt,
+          endsAt,
+          sortOrder: Number.isFinite(priority) ? Math.max(0, Math.round(priority)) : a.sortOrder,
+        },
+      },
       {
         onSuccess: () => {
           setDrafts((prev) => {
@@ -110,6 +183,8 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
 
   const toggleActive = (a: Announcement, active: boolean) =>
     updateAnnouncement.mutate({ id: a.id, data: { active } }, { onError: fail("تعذّر التحديث") });
+  const setAudience = (a: Announcement, audience: AnnouncementAudience) =>
+    updateAnnouncement.mutate({ id: a.id, data: { audience } }, { onError: fail("تعذّر التحديث") });
 
   const move = (index: number, dir: -1 | 1) => {
     const target = index + dir;
@@ -144,7 +219,7 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
       id="announcements"
       icon={Megaphone}
       title="شريط الإعلانات المتحرك"
-      description="يظهر أعلى واجهة المستخدم وأسفل واجهة الموقع. الإعلانات النشطة فقط تصل للمستخدمين، بالترتيب الذي تحدده."
+      description="يظهر أعلى واجهة المستخدم وأسفل واجهة الموقع. يصل للمستخدمين فقط ما هو نشط وضمن مدته ومطابق لفئتهم — وهذا يُفرض في قاعدة البيانات لا في الواجهة."
     >
       <ToggleRow
         label="إظهار الشريط"
@@ -181,7 +256,8 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
           <ul className="space-y-2" data-testid="announcements-list">
             {list.map((a, index) => {
               const d = draftOf(a);
-              const dirty = d.text.trim() !== a.text || d.link.trim() !== a.link;
+              const dirty = isDirty(a);
+              const state = STATE_LABELS[announcementState(a)];
               return (
                 <li
                   key={a.id}
@@ -212,7 +288,17 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
                       >
                         <ArrowDown className="h-4 w-4" />
                       </button>
-                      <span className="text-xs text-gray-400 md:text-center">{index + 1}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={d.priority}
+                        onChange={(event) => setDraft(a, { priority: event.target.value })}
+                        onBlur={() => saveText(a)}
+                        title="الأولوية — الأصغر يظهر أولاً"
+                        aria-label="الأولوية"
+                        className="h-7 w-12 rounded border border-gray-200 text-center text-xs"
+                        dir="ltr"
+                      />
                     </div>
                     <div className="flex-1 space-y-2">
                       <Input
@@ -233,11 +319,49 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
                         placeholder="رابط اختياري: /subscription أو https://…"
                         aria-label="رابط الإعلان"
                       />
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <label className="text-[11px] text-gray-600">
+                          يبدأ من
+                          <Input
+                            type="datetime-local"
+                            value={d.startsAt}
+                            onChange={(event) => setDraft(a, { startsAt: event.target.value })}
+                            onBlur={() => saveText(a)}
+                            dir="ltr"
+                            className="mt-1 h-8 text-xs"
+                          />
+                        </label>
+                        <label className="text-[11px] text-gray-600">
+                          ينتهي في
+                          <Input
+                            type="datetime-local"
+                            value={d.endsAt}
+                            onChange={(event) => setDraft(a, { endsAt: event.target.value })}
+                            onBlur={() => saveText(a)}
+                            dir="ltr"
+                            className="mt-1 h-8 text-xs"
+                          />
+                        </label>
+                        <label className="text-[11px] text-gray-600">
+                          يظهر لـ
+                          <div className="mt-1">
+                            <SelectInput
+                              value={a.audience}
+                              onChange={(value) => setAudience(a, value as AnnouncementAudience)}
+                              options={AUDIENCE_OPTIONS}
+                              disabled={busy}
+                            />
+                          </div>
+                        </label>
+                      </div>
                       {dirty && (
                         <p className="text-[11px] text-amber-700">تغييرات غير محفوظة — تُحفظ عند مغادرة الحقل</p>
                       )}
                     </div>
                     <div className="flex shrink-0 items-center gap-3 md:flex-col md:items-end">
+                      <span className={"rounded-full px-2 py-0.5 text-[11px] font-bold " + state.cls}>
+                        {state.label}
+                      </span>
                       <label className="flex items-center gap-2 text-xs text-gray-700">
                         <Switch
                           checked={a.active}
@@ -266,7 +390,7 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
         )}
 
         <form
-          className="grid gap-2 rounded-xl border border-line bg-cream-2 p-3 md:grid-cols-[2fr_1fr_auto] md:items-end"
+          className="grid gap-2 rounded-xl border border-line bg-cream-2 p-3 md:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] md:items-end"
           onSubmit={(event) => {
             event.preventDefault();
             add();
@@ -289,6 +413,32 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
               maxLength={500}
               dir="ltr"
               placeholder="/subscription"
+            />
+          </FieldRow>
+          <FieldRow label="يظهر لـ" htmlFor="new-announcement-audience">
+            <SelectInput
+              id="new-announcement-audience"
+              value={newAudience}
+              onChange={(value) => setNewAudience(value as AnnouncementAudience)}
+              options={AUDIENCE_OPTIONS}
+            />
+          </FieldRow>
+          <FieldRow label="يبدأ من (اختياري)" htmlFor="new-announcement-starts">
+            <Input
+              id="new-announcement-starts"
+              type="datetime-local"
+              value={newStarts}
+              onChange={(event) => setNewStarts(event.target.value)}
+              dir="ltr"
+            />
+          </FieldRow>
+          <FieldRow label="ينتهي في (اختياري)" htmlFor="new-announcement-ends">
+            <Input
+              id="new-announcement-ends"
+              type="datetime-local"
+              value={newEnds}
+              onChange={(event) => setNewEnds(event.target.value)}
+              dir="ltr"
             />
           </FieldRow>
           <Button

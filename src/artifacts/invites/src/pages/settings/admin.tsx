@@ -102,7 +102,20 @@ interface UserDraft {
  * ومع ذلك فكل عملية حسّاسة هنا تمر بدالة أو سياسة تتحقق من الصلاحية
  * داخل قاعدة البيانات، فالواجهة ليست خط الحماية.
  */
-export default function AdminSettings({ me }: { me: Me }) {
+export type AdminCardId =
+  | "stats" | "profile" | "security" | "users" | "plans" | "send-fee" | "templates"
+  | "invites" | "notifications" | "announcements" | "site" | "support" | "content" | "session";
+
+interface AdminSettingsProps {
+  me: Me;
+  /** البطاقات المعروضة — الافتراضي الكل */
+  only?: AdminCardId[];
+  /** داخل لوحة الأدمن: بلا تخطيط الصفحة ولا العنوان */
+  embedded?: boolean;
+}
+
+export default function AdminSettings({ me, only, embedded = false }: AdminSettingsProps) {
+  const show = (id: AdminCardId) => !only || only.includes(id);
   const { toast } = useToast();
   const { signOut } = useAuth();
 
@@ -322,13 +335,12 @@ export default function AdminSettings({ me }: { me: Me }) {
   }, [adminEvents]);
 
   if (!form) {
-    return (
-      <AppLayout>
-        <div className="flex justify-center py-32">
-          <Loader2 className="w-8 h-8 animate-spin text-gold" />
-        </div>
-      </AppLayout>
+    const loader = (
+      <div className="flex justify-center py-32">
+        <Loader2 className="w-8 h-8 animate-spin text-gold" />
+      </div>
     );
+    return embedded ? loader : <AppLayout>{loader}</AppLayout>;
   }
 
   const statCards = [
@@ -342,16 +354,19 @@ export default function AdminSettings({ me }: { me: Me }) {
     { label: "مناسبات هذا الأسبوع", value: soonEventsCount },
   ];
 
-  return (
-    <AppLayout>
-      <div className="p-5 md:p-10 max-w-4xl mx-auto space-y-6">
+  const body = (
+      <div className={embedded ? "space-y-6" : "p-5 md:p-10 max-w-4xl mx-auto space-y-6"}>
+        {!embedded && (
         <header>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">إعدادات الإدارة</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">إعدادات الحساب</h1>
           <p className="text-gray-600 mt-1">
-            إدارة الحسابات والباقات والقوالب وإعدادات الموقع العامة.
+            بيانات حسابك وأمانه. إدارة المنصة كاملة من{" "}
+            <a href="/admin" className="text-gold-deep underline">لوحة التحكم</a>.
           </p>
         </header>
+        )}
 
+        {show("stats") && (
         <SettingsCard
           id="stats"
           icon={BarChart3}
@@ -377,7 +392,9 @@ export default function AdminSettings({ me }: { me: Me }) {
             </div>
           ) : null}
         </SettingsCard>
+        )}
 
+        {show("profile") && (
         <SettingsCard
           id="profile"
           icon={ShieldCheck}
@@ -418,8 +435,10 @@ export default function AdminSettings({ me }: { me: Me }) {
             }
           />
         </SettingsCard>
+        )}
 
-        <AccountSecurityCard currentEmail={me.email} />
+        {show("security") && <AccountSecurityCard currentEmail={me.email} />}
+        {show("users") && (
         <SettingsCard
           id="users"
           icon={Users}
@@ -518,6 +537,8 @@ export default function AdminSettings({ me }: { me: Me }) {
             </Button>
           ) : null}
         </SettingsCard>
+        )}
+        {show("plans") && (
         <SettingsCard
           id="plans"
           icon={CreditCard}
@@ -587,7 +608,9 @@ export default function AdminSettings({ me }: { me: Me }) {
             />
           </div>
         </SettingsCard>
+        )}
 
+        {show("send-fee") && (
         <SettingsCard
           id="send-fee"
           icon={Banknote}
@@ -690,7 +713,9 @@ export default function AdminSettings({ me }: { me: Me }) {
             />
           </div>
         </SettingsCard>
+        )}
 
+        {show("templates") && (
         <SettingsCard
           id="templates"
           icon={Palette}
@@ -795,6 +820,8 @@ export default function AdminSettings({ me }: { me: Me }) {
             </Button>
           </div>
         </SettingsCard>
+        )}
+        {show("invites") && (
         <SettingsCard
           id="invites"
           icon={FileText}
@@ -842,7 +869,9 @@ export default function AdminSettings({ me }: { me: Me }) {
             }
           />
         </SettingsCard>
+        )}
 
+        {show("notifications") && (
         <SettingsCard
           id="notifications"
           icon={Bell}
@@ -877,9 +906,11 @@ export default function AdminSettings({ me }: { me: Me }) {
             }
           />
         </SettingsCard>
+        )}
 
-        <AnnouncementsCard settings={settings ?? form} />
+        {show("announcements") && <AnnouncementsCard settings={settings ?? form} />}
 
+        {show("site") && (
         <SettingsCard
           id="site"
           icon={Globe}
@@ -926,6 +957,8 @@ export default function AdminSettings({ me }: { me: Me }) {
             }
           />
         </SettingsCard>
+        )}
+        {show("support") && (
         <SettingsCard
           id="support"
           icon={Mail}
@@ -981,7 +1014,9 @@ export default function AdminSettings({ me }: { me: Me }) {
             }
           />
         </SettingsCard>
+        )}
 
+        {show("content") && (
         <SettingsCard
           id="content"
           icon={ScrollText}
@@ -1030,7 +1065,9 @@ export default function AdminSettings({ me }: { me: Me }) {
             }
           />
         </SettingsCard>
+        )}
 
+        {show("session") && (
         <SettingsCard
           id="session"
           icon={LogOut}
@@ -1048,7 +1085,8 @@ export default function AdminSettings({ me }: { me: Me }) {
             تسجيل الخروج
           </Button>
         </SettingsCard>
+        )}
       </div>
-    </AppLayout>
   );
+  return embedded ? body : <AppLayout>{body}</AppLayout>;
 }
