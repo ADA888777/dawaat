@@ -8,6 +8,10 @@ import {
   useDeleteGuest,
   useBulkCreateGuests,
   useMarkInviteStatus,
+  useGetAppSettings,
+  useGetEventPayment,
+  paymentErrorMessage,
+  PAYMENT_STATUS_LABELS,
   MAX_IMPORT_ROWS,
   phoneMatchKey,
   toWesternDigits,
@@ -32,6 +36,8 @@ import {
   Download,
   Info,
   CheckSquare,
+  Lock,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +58,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ContactImportDialog } from "@/components/contact-import-dialog";
+import { SendPaymentDialog, formatFee } from "@/components/send-payment-dialog";
 import { QrCode, useQrDataUrl } from "@/components/qr-code";
 import {
   buildGuestInviteUrl,
@@ -108,6 +115,37 @@ export default function EventDetail() {
   const [isPickingContacts, setIsPickingContacts] = useState(false);
   const contactSupport = useMemo(() => getContactPickerSupport(), []);
   const [isQrOpen, setIsQrOpen] = useState(false);
+
+  // ─────────── رسوم الإرسال: لا إرسال قبل الدفع ───────────
+  // الحماية الفعلية في قاعدة البيانات (PAYMENT_REQUIRED)؛ هنا نقود المستخدم
+  // إلى شاشة الدفع بدل ترك الزر يفشل، ونخفي مسارات المشاركة قبل الدفع.
+  const { data: appSettings } = useGetAppSettings();
+  const {
+    data: payment,
+    isLoading: isLoadingPayment,
+    refetch: refetchPayment,
+  } = useGetEventPayment(eventId, { query: { enabled: hasValidId } });
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const sendFee = appSettings?.sendFeeAmount ?? 0;
+  const sendingUnlocked = sendFee <= 0 || payment?.status === "paid";
+
+  /** يفتح شاشة الدفع إذا كان الإرسال مقفلاً، ويرجع هل يمكن المتابعة */
+  const ensurePaid = (): boolean => {
+    if (sendingUnlocked) return true;
+    setIsPaymentOpen(true);
+    return false;
+  };
+
+  /** خطأ الحماية من قاعدة البيانات يعيد المستخدم إلى شاشة الدفع */
+  const handleSendError = (err: unknown, fallbackTitle: string) => {
+    const message = paymentErrorMessage(err);
+    const locked = err instanceof Error && err.message.includes("PAYMENT_REQUIRED");
+    if (locked) {
+      void refetchPayment();
+      setIsPaymentOpen(true);
+    }
+    toast({ title: locked ? "الإرسال يتطلب الدفع أولاً" : fallbackTitle, description: message, variant: "destructive" });
+  };
   const [guestToDelete, setGuestToDelete] = useState<Guest | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -329,17 +367,23 @@ export default function EventDetail() {
       toast({ title: "اختر مدعوّاً واحداً على الأقل" });
       return;
     }
+    // شاشة الدفع أولاً — قائمة الإرسال لا تُفتح إلا بعد نجاح الدفع
+    if (!ensurePaid()) return;
     markInviteStatus.mutate(
       {
         eventId,
         guestIds: selectedGuests.map((g) => g.id),
         status: "prepared",
       },
-      { onError: () => toast({ title: "تعذر تسجيل حالة التجهيز", variant: "destructive" }) },
+      {
+        onSuccess: () => {
+          setSendQueue(selectedGuests);
+          setSendIndex(0);
+          setOpenedCurrent(false);
+        },
+        onError: (err) => handleSendError(err, "تعذر تسجيل حالة التجهيز"),
+      },
     );
-    setSendQueue(selectedGuests);
-    setSendIndex(0);
-    setOpenedCurrent(false);
   };
 
   const currentSendGuest =
@@ -380,7 +424,13 @@ export default function EventDetail() {
 
   /** إرسال لمدعو واحد من صف الجدول: يفتح واتساب ويسجّل "تم تجهيز الدعوة" */
   const sendSingle = (guest: Guest) => {
-    markInviteStatus.mutate({ eventId, guestIds: [guest.id], status: "prepared" });
+    if (!ensurePaid()) return;
+    // نفتح واتساب من داخل معالج الضغط نفسه (المتصفح يشترط ذلك)، وإن رفضت
+    // قاعدة البيانات التجهيز لعدم الدفع نعيد المستخدم إلى شاشة الدفع
+    markInviteStatus.mutate(
+      { eventId, guestIds: [guest.id], status: "prepared" },
+      { onError: (err) => handleSendError(err, "تعذر تسجيل حالة التجهيز") },
+    );
     window.open(buildWhatsAppUrl(guest.phone, messageFor(guest)), "_blank", "noopener");
   };
 
@@ -437,9 +487,15 @@ export default function EventDetail() {
             <Button
               variant="outline"
               className="border-gray-200"
-              onClick={() => setIsQrOpen(true)}
+              onClick={() => { if (ensurePaid()) setIsQrOpen(true); }}
+              title={sendingUnlocked ? undefined : "يتطلب دفع رسوم الإرسال أولاً"}
             >
-              <QrIcon className="ml-2 h-4 w-4" /> رمز QR والرابط
+              {sendingUnlocked ? (
+                <QrIcon className="ml-2 h-4 w-4" />
+              ) : (
+                <Lock className="ml-2 h-4 w-4" />
+              )}
+              رمز QR والرابط
             </Button>
             <Button
               variant="outline"
@@ -455,6 +511,49 @@ export default function EventDetail() {
             </Link>
           </div>
         </div>
+
+        {sendFee > 0 && (
+          <div
+            className={
+              "flex flex-col gap-3 rounded-xl border p-4 text-sm md:flex-row md:items-center md:justify-between " +
+              (sendingUnlocked
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : payment?.status === "submitted"
+                  ? "border-amber-200 bg-amber-50 text-amber-900"
+                  : "border-line bg-cream-2 text-gray-800")
+            }
+            data-testid="send-fee-banner"
+          >
+            <div className="flex items-start gap-2">
+              {sendingUnlocked ? (
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+              ) : (
+                <Lock className="mt-0.5 h-5 w-5 shrink-0" />
+              )}
+              <div>
+                <p className="font-bold">
+                  {sendingUnlocked
+                    ? "رسوم الإرسال مدفوعة — الإرسال مفتوح لهذه المناسبة"
+                    : "إرسال الدعوات يتطلب دفع رسوم " +
+                      formatFee(payment?.amount ?? sendFee, payment?.currency ?? appSettings?.sendFeeCurrency ?? "SAR")}
+                </p>
+                <p className="text-xs opacity-80">
+                  {payment
+                    ? "حالة الدفع: " + PAYMENT_STATUS_LABELS[payment.status]
+                    : "تُدفع مرة واحدة لكل مناسبة، وبعد موافقة الإدارة يُفتح الإرسال لكل المدعوين."}
+                </p>
+              </div>
+            </div>
+            {!sendingUnlocked && (
+              <Button
+                onClick={() => setIsPaymentOpen(true)}
+                className="bg-gold font-bold text-black hover:bg-gold/90"
+              >
+                {payment?.status === "submitted" ? "عرض حالة الدفع" : "الدفع الآن"}
+              </Button>
+            )}
+          </div>
+        )}
 
         <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
           <div className="flex flex-col gap-4 border-b border-gray-100 p-6 md:flex-row md:items-center md:justify-between">
@@ -482,7 +581,11 @@ export default function EventDetail() {
                 disabled={selectedIds.length === 0}
                 className="bg-green-600 font-medium text-white hover:bg-green-700"
               >
-                <Send className="ml-2 h-4 w-4" />
+                {sendingUnlocked ? (
+                  <Send className="ml-2 h-4 w-4" />
+                ) : (
+                  <Lock className="ml-2 h-4 w-4" />
+                )}
                 إرسال الدعوات
                 {selectedIds.length > 0 ? " (" + selectedIds.length + ")" : ""}
               </Button>
@@ -615,9 +718,9 @@ export default function EventDetail() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() =>
-                                copyText(guestInviteUrl(guest), "link-" + guest.id)
-                              }
+                              onClick={() => {
+                                if (ensurePaid()) copyText(guestInviteUrl(guest), "link-" + guest.id);
+                              }}
                               className="h-8 w-8 text-gray-500 hover:bg-gray-100"
                               title="نسخ رابط الدعوة الخاص بهذا المدعو"
                             >
@@ -782,6 +885,23 @@ export default function EventDetail() {
           )}
         </DialogContent>
       </Dialog>
+
+      {appSettings && (
+        <SendPaymentDialog
+          open={isPaymentOpen}
+          onOpenChange={setIsPaymentOpen}
+          eventId={eventId}
+          eventTitle={event.title}
+          settings={appSettings}
+          payment={payment ?? null}
+          isLoadingPayment={isLoadingPayment}
+          onRefresh={() => void refetchPayment()}
+          onContinue={() => {
+            setIsPaymentOpen(false);
+            if (selectedGuests.length > 0) startSending();
+          }}
+        />
+      )}
 
       <ContactImportDialog
         open={isImportOpen}
