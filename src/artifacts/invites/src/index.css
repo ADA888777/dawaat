@@ -217,3 +217,35 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
+
+/* =====================================================================
+شريط الإعلانات المتحرك (components/announcement-ticker.tsx)
+- الشريط السفلي ثابت، فيحجز مساحته أسفل الصفحة عبر --ticker-bottom
+  حتى لا يغطي أي محتوى (بما فيه أزرار أسفل الصفحات الطويلة).
+- الحركة نحو اليمين لأن النص عربي: بداية الجملة تدخل أولاً من اليسار.
+- المسار يتحرك بمقدار نسخة واحدة بالضبط (--ticker-shift) فيبدو متصلاً.
+===================================================================== */
+body {
+  padding-bottom: var(--ticker-bottom, 0px);
+}
+
+@keyframes ticker-scroll-rtl {
+  from { transform: translateX(calc(-1 * var(--ticker-shift, 0px))); }
+  to   { transform: translateX(0); }
+}
+
+.ticker-track {
+  animation: ticker-scroll-rtl var(--ticker-duration, 20s) linear infinite;
+  will-change: transform;
+}
+
+.ticker-viewport:hover .ticker-track,
+.ticker-viewport:focus-within .ticker-track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track {
+    animation: none;
+  }
+}
