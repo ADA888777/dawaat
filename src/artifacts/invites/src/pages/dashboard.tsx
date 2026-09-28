@@ -4,6 +4,7 @@ import { Calendar, Users, CheckCircle, Bell, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import { Link } from "wouter";
+import { AnnouncementBanner } from "@/components/announcement-banner";
 
 export default function Dashboard() {
   const { data: summary, isLoading: isLoadingSummary } = useGetDashboardSummary();
@@ -12,7 +13,10 @@ export default function Dashboard() {
   return (
     <AppLayout>
       <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
-        <div className="flex justify-between items-center">
+        {/* الإعلانات قبل «نظرة عامة» مباشرة */}
+        <AnnouncementBanner place="dashboard" />
+
+        <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">نظرة عامة</h1>
             <p className="text-gray-600 mt-1">ملخص نشاط دعواتك وإحصائيات الحضور</p>

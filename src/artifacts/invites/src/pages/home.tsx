@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useListTemplates, type EventCategory } from "@/lib/api";
 import { Footer } from "@/components/footer";
+import { AnnouncementBanner } from "@/components/announcement-banner";
 
 /* =====================================================================
    الواجهة العامة — تصميم فاتح كريمي/ذهبي.
@@ -208,6 +209,11 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        {/* ═══ شريط الإعلانات ═══ */}
+        <div className="mx-auto max-w-[1120px] px-5 md:px-6">
+          <AnnouncementBanner place="home" className="-mt-6 md:-mt-8" />
+        </div>
 
         {/* ═══ شريط المزايا ═══ */}
         <section className="pt-11">
