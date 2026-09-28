@@ -54,6 +54,7 @@ import {
   SettingsCard,
   ToggleRow,
 } from "./parts";
+import { AnnouncementsCard } from "./announcements-card";
 
 const ROLE_OPTIONS = [
   { value: "user", label: "مستخدم" },
@@ -876,6 +877,8 @@ export default function AdminSettings({ me }: { me: Me }) {
             }
           />
         </SettingsCard>
+
+        <AnnouncementsCard settings={settings ?? form} />
 
         <SettingsCard
           id="site"
