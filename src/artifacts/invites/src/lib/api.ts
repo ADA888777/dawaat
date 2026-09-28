@@ -1027,6 +1027,9 @@ export interface AppSettings {
   bankAccountName: string;
   bankIban: string;
   paymentInstructions: string;
+  /** شريط الإعلانات المتحرك: الإظهار والسرعة (بكسل/ثانية) */
+  tickerEnabled: boolean;
+  tickerSpeed: number;
 }
 
 const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
@@ -1057,6 +1060,8 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   bankAccountName: "bank_account_name",
   bankIban: "bank_iban",
   paymentInstructions: "payment_instructions",
+  tickerEnabled: "ticker_enabled",
+  tickerSpeed: "ticker_speed",
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -1087,6 +1092,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   bankAccountName: "",
   bankIban: "",
   paymentInstructions: "",
+  tickerEnabled: true,
+  tickerSpeed: 60,
 };
 
 export const getGetAppSettingsQueryKey = () => ["app-settings"] as const;
@@ -1447,4 +1454,114 @@ export function paymentErrorMessage(err: unknown): string {
     return "نظام الدفع غير مفعّل بعد في قاعدة البيانات (الهجرة 0006 لم تُطبَّق).";
   }
   return raw || "حدث خطأ غير متوقع";
+}
+
+// ---------------- شريط الإعلانات المتحرك ----------------
+export interface Announcement {
+  id: number;
+  text: string;
+  link: string;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
+function mapAnnouncement(r: Record<string, unknown>): Announcement {
+  return {
+    id: Number(r.id),
+    text: String(r.text ?? ""),
+    link: String(r.link ?? ""),
+    active: Boolean(r.active),
+    sortOrder: Number(r.sort_order ?? 0),
+    createdAt: String(r.created_at ?? ""),
+  };
+}
+
+export const getListAnnouncementsQueryKey = () => ["announcements"] as const;
+
+/**
+ * الإعلانات مرتّبة. سياسة RLS تعيد للزائر والمستخدم النشط فقط، وللأدمن الكل.
+ * تعذّر القراءة (مثلاً قبل تطبيق الهجرة 0007) يعني ببساطة: لا شريط.
+ */
+export function useListAnnouncements() {
+  return useQuery({
+    queryKey: getListAnnouncementsQueryKey(),
+    staleTime: 120_000,
+    retry: 1,
+    queryFn: async (): Promise<Announcement[]> => {
+      const { data, error } = await supabase
+        .from("announcements").select("*")
+        .order("sort_order").order("id");
+      if (error) return [];
+      return ((data ?? []) as Record<string, unknown>[]).map(mapAnnouncement);
+    },
+  });
+}
+
+export interface AnnouncementPayload {
+  text: string;
+  link?: string;
+  active?: boolean;
+  sortOrder?: number;
+}
+
+function announcementRow(data: Partial<AnnouncementPayload>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (data.text !== undefined) row.text = data.text.trim().slice(0, 200);
+  if (data.link !== undefined) row.link = data.link.trim().slice(0, 500);
+  if (data.active !== undefined) row.active = data.active;
+  if (data.sortOrder !== undefined) row.sort_order = data.sortOrder;
+  return row;
+}
+
+export function useCreateAnnouncement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: AnnouncementPayload): Promise<Announcement> => {
+      const { data: row, error } = await supabase
+        .from("announcements").insert(announcementRow(data)).select("*").single();
+      throwIf(error);
+      return mapAnnouncement(row as Record<string, unknown>);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: getListAnnouncementsQueryKey() }),
+  });
+}
+
+export function useUpdateAnnouncement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: Partial<AnnouncementPayload> }) => {
+      const row = announcementRow(data);
+      if (Object.keys(row).length === 0) return;
+      const { error } = await supabase.from("announcements").update(row).eq("id", id);
+      throwIf(error);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: getListAnnouncementsQueryKey() }),
+  });
+}
+
+export function useDeleteAnnouncement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id }: { id: number }) => {
+      const { error } = await supabase.from("announcements").delete().eq("id", id);
+      throwIf(error);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: getListAnnouncementsQueryKey() }),
+  });
+}
+
+/** يعيد ترقيم sort_order لكل القائمة بالترتيب المعطى (بعد تحريك عنصر) */
+export function useReorderAnnouncements() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderedIds }: { orderedIds: number[] }) => {
+      for (let i = 0; i < orderedIds.length; i++) {
+        const { error } = await supabase
+          .from("announcements").update({ sort_order: i + 1 }).eq("id", orderedIds[i]);
+        throwIf(error);
+      }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: getListAnnouncementsQueryKey() }),
+  });
 }
