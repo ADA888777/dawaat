@@ -350,7 +350,8 @@ class Handler(BaseHTTPRequestHandler):
             c.close(); return self._send(201, [])
         cols = list(rows[0].keys())
         vals_sql = ", ".join(["(" + ", ".join(["%s"] * len(cols)) + ")"] * len(rows))
-        params = [r.get(cl) for r in rows for cl in cols]
+        params = [psycopg2.extras.Json(r.get(cl)) if isinstance(r.get(cl), (dict, list)) else r.get(cl)
+                  for r in rows for cl in cols]
         sql = (f'insert into public."{table}" (' + ", ".join(f'"{cl}"' for cl in cols) +
                f") values {vals_sql}")
         prefer = self.headers.get("Prefer", "")
@@ -379,7 +380,8 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body() or {}
         table = path[len("/rest/v1/"):]
         c, cur, _ = self._conn()
-        params = list(body.values())
+        # القيم الكائنية (jsonb مثل feature_flags) تُمرَّر كـ JSON كما يفعل PostgREST
+        params = [psycopg2.extras.Json(v) if isinstance(v, (dict, list)) else v for v in body.values()]
         sets = ", ".join(f'"{k}" = %s' for k in body)
         where = build_filters(qs, params)
         sql = f'update public."{table}" set {sets}'
