@@ -15,6 +15,7 @@ import {
   Trash2,
   Search,
   FileText,
+  Banknote,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -582,6 +583,109 @@ export default function AdminSettings({ me }: { me: Me }) {
               onSave={() => saveSettings(["paidPlanPrice", "paidPlanMonths"], "تم حفظ بيانات الباقة")}
               label="حفظ بيانات الباقة"
               note="السعر يظهر في صفحة الباقات للمستخدمين."
+            />
+          </div>
+        </SettingsCard>
+
+        <SettingsCard
+          id="send-fee"
+          icon={Banknote}
+          title="رسوم إرسال الدعوات"
+          description="المبلغ الذي يدفعه المستخدم مرة واحدة لكل مناسبة قبل الإرسال النهائي. اتركه 0 ليكون الإرسال مجانياً بلا شاشة دفع."
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <FieldRow
+              label="مبلغ الرسوم (ريال)"
+              htmlFor="send-fee-amount"
+              hint="يظهر للمستخدم بوضوح قبل الدفع. تغييره لا يؤثر على العمليات القائمة."
+            >
+              <Input
+                id="send-fee-amount"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                max={100000}
+                step="0.01"
+                dir="ltr"
+                value={String(form.sendFeeAmount)}
+                onChange={(event) => setField("sendFeeAmount", Math.max(0, Number(event.target.value) || 0))}
+              />
+            </FieldRow>
+            <FieldRow label="العملة" htmlFor="send-fee-currency">
+              <Input
+                id="send-fee-currency"
+                dir="ltr"
+                maxLength={8}
+                value={form.sendFeeCurrency}
+                onChange={(event) => setField("sendFeeCurrency", event.target.value.toUpperCase())}
+              />
+            </FieldRow>
+          </div>
+          <SaveBar
+            pending={updateSettings.isPending}
+            onSave={() => saveSettings(["sendFeeAmount", "sendFeeCurrency"], "تم حفظ رسوم الإرسال")}
+            label="حفظ الرسوم"
+            note={
+              form.sendFeeAmount > 0
+                ? "الإرسال مقفل لكل مناسبة حتى تدفع رسومها وتوافق عليها الإدارة."
+                : "الرسوم صفر: الإرسال مفتوح للجميع بلا شاشة دفع."
+            }
+          />
+
+          <div className="pt-4 border-t border-gray-100 space-y-5">
+            <p className="text-sm text-gray-700 leading-relaxed">
+              طريقة الدفع الحالية: تحويل بنكي ثم رفع إثبات التحويل، وتراجعه الإدارة من
+              لوحة التحكم ← تبويب «المدفوعات». هذه البيانات تظهر للمستخدم في شاشة الدفع.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <FieldRow label="اسم البنك" htmlFor="bank-name">
+                <Input
+                  id="bank-name"
+                  value={form.bankName}
+                  onChange={(event) => setField("bankName", event.target.value)}
+                  placeholder="مثال: مصرف الراجحي"
+                />
+              </FieldRow>
+              <FieldRow label="اسم المستفيد" htmlFor="bank-account-name">
+                <Input
+                  id="bank-account-name"
+                  value={form.bankAccountName}
+                  onChange={(event) => setField("bankAccountName", event.target.value)}
+                />
+              </FieldRow>
+            </div>
+            <FieldRow label="الآيبان (IBAN)" htmlFor="bank-iban">
+              <Input
+                id="bank-iban"
+                dir="ltr"
+                className="font-mono"
+                maxLength={40}
+                value={form.bankIban}
+                onChange={(event) => setField("bankIban", event.target.value.toUpperCase())}
+                placeholder="SA00 0000 0000 0000 0000 0000"
+              />
+            </FieldRow>
+            <FieldRow
+              label="تعليمات إضافية للدفع"
+              htmlFor="payment-instructions"
+              hint="اختياري — مثل: اكتب اسم المناسبة في وصف التحويل."
+            >
+              <Textarea
+                id="payment-instructions"
+                rows={3}
+                value={form.paymentInstructions}
+                onChange={(event) => setField("paymentInstructions", event.target.value)}
+              />
+            </FieldRow>
+            <SaveBar
+              pending={updateSettings.isPending}
+              onSave={() =>
+                saveSettings(
+                  ["bankName", "bankAccountName", "bankIban", "paymentInstructions"],
+                  "تم حفظ بيانات التحويل",
+                )
+              }
+              label="حفظ بيانات التحويل"
             />
           </div>
         </SettingsCard>
