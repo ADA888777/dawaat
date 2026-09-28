@@ -26,7 +26,8 @@ export function AnnouncementTicker({ position }: AnnouncementTickerProps) {
   const { data: settings } = useGetAppSettings();
   const { data: announcements } = useListAnnouncements();
 
-  const enabled = settings?.tickerEnabled ?? true;
+  const enabled =
+    (settings?.tickerEnabled ?? true) && (settings?.featureFlags?.announcements_bar ?? true);
   const speed = Math.min(300, Math.max(10, settings?.tickerSpeed ?? 60));
   const items = (announcements ?? []).filter((a) => a.active && a.text.trim() !== "");
   const visible = enabled && items.length > 0;
