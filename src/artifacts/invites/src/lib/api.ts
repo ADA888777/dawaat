@@ -1020,6 +1020,13 @@ export interface AppSettings {
   privacyText: string;
   refundText: string;
   contentPolicyText: string;
+  /** رسوم إرسال الدعوات لكل مناسبة — 0 = مجاني بلا شاشة دفع */
+  sendFeeAmount: number;
+  sendFeeCurrency: string;
+  bankName: string;
+  bankAccountName: string;
+  bankIban: string;
+  paymentInstructions: string;
 }
 
 const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
@@ -1044,6 +1051,12 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   privacyText: "privacy_text",
   refundText: "refund_text",
   contentPolicyText: "content_policy_text",
+  sendFeeAmount: "send_fee_amount",
+  sendFeeCurrency: "send_fee_currency",
+  bankName: "bank_name",
+  bankAccountName: "bank_account_name",
+  bankIban: "bank_iban",
+  paymentInstructions: "payment_instructions",
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -1068,6 +1081,12 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   privacyText: "",
   refundText: "",
   contentPolicyText: "",
+  sendFeeAmount: 0,
+  sendFeeCurrency: "SAR",
+  bankName: "",
+  bankAccountName: "",
+  bankIban: "",
+  paymentInstructions: "",
 };
 
 export const getGetAppSettingsQueryKey = () => ["app-settings"] as const;
@@ -1169,4 +1188,263 @@ export function useAdminSetFreeLimit() {
       qc.invalidateQueries({ queryKey: getGetMeQueryKey() });
     },
   });
+}
+
+// ---------------- رسوم الإرسال: الدفع قبل الإرسال النهائي ----------------
+/**
+ * إرسال الدعوات لمناسبة يتطلب عملية دفع بحالة «مدفوعة». الحماية الفعلية في
+ * قاعدة البيانات (mark_guests_invite_status ترفض بـ PAYMENT_REQUIRED)،
+ * والواجهة هنا تعرض الحالة وتقود المستخدم: طلب ← تحويل بنكي + إثبات ←
+ * مراجعة الأدمن ← يُفتح الإرسال. الحقول provider/providerRef محجوزة
+ * لربط بوابة دفع إلكترونية لاحقاً بنفس الجدول والتدفق.
+ */
+export type PaymentStatus = "pending" | "submitted" | "paid" | "rejected" | "cancelled";
+export type PaymentMethod = "bank_transfer" | "gateway" | "free";
+export type SendingStatus = "not_started" | "in_progress" | "completed";
+
+export interface EventPayment {
+  id: number;
+  userId: string;
+  eventId: number;
+  amount: number;
+  currency: string;
+  method: PaymentMethod;
+  status: PaymentStatus;
+  reference: string;
+  proofPath: string | null;
+  provider: string | null;
+  providerRef: string | null;
+  submittedAt: string | null;
+  paidAt: string | null;
+  reviewedAt: string | null;
+  adminNote: string;
+  sendingStatus: SendingStatus;
+  sendingStartedAt: string | null;
+  sendingCompletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** عملية دفع كما يراها الأدمن: مع اسم المناسبة وصاحبها */
+export interface AdminEventPayment extends EventPayment {
+  eventTitle: string;
+  eventDate: string | null;
+  userName: string;
+  userEmail: string;
+}
+
+/** PostgREST يعيد الصف المفرد كائناً؛ بعض البيئات تعيده داخل مصفوفة */
+function singleRow(data: unknown): Record<string, unknown> {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== "object") throw new Error("استجابة غير متوقعة من الخادم");
+  return row as Record<string, unknown>;
+}
+
+function mapPayment(r: Record<string, unknown>): EventPayment {
+  const str = (v: unknown) => (v === null || v === undefined ? null : String(v));
+  return {
+    id: Number(r.id),
+    userId: String(r.user_id),
+    eventId: Number(r.event_id),
+    amount: Number(r.amount ?? 0),
+    currency: String(r.currency ?? "SAR"),
+    method: (r.method as PaymentMethod) ?? "bank_transfer",
+    status: (r.status as PaymentStatus) ?? "pending",
+    reference: String(r.reference ?? ""),
+    proofPath: str(r.proof_path),
+    provider: str(r.provider),
+    providerRef: str(r.provider_ref),
+    submittedAt: str(r.submitted_at),
+    paidAt: str(r.paid_at),
+    reviewedAt: str(r.reviewed_at),
+    adminNote: String(r.admin_note ?? ""),
+    sendingStatus: (r.sending_status as SendingStatus) ?? "not_started",
+    sendingStartedAt: str(r.sending_started_at),
+    sendingCompletedAt: str(r.sending_completed_at),
+    createdAt: String(r.created_at ?? ""),
+    updatedAt: String(r.updated_at ?? ""),
+  };
+}
+
+export const getGetEventPaymentQueryKey = (eventId: number) =>
+  ["event-payment", eventId] as const;
+export const getListAdminPaymentsQueryKey = () => ["admin", "payments"] as const;
+
+/** العملية النشطة للمناسبة (pending/submitted/paid) إن وُجدت — والمرفوضة الأخيرة وإلا */
+export function useGetEventPayment(eventId: number, opts?: QueryOpts) {
+  return useQuery({
+    queryKey: getGetEventPaymentQueryKey(eventId),
+    enabled: opts?.query?.enabled ?? Number.isFinite(eventId),
+    // أثناء مراجعة الإدارة نعيد الاستعلام كل نصف دقيقة حتى يُفتح الإرسال تلقائياً
+    refetchInterval: (query) =>
+      query.state.data?.status === "submitted" ? 30_000 : false,
+    queryFn: async (): Promise<EventPayment | null> => {
+      const { data, error } = await supabase
+        .from("event_payments").select("*")
+        .eq("event_id", eventId)
+        .order("id", { ascending: false });
+      // الجدول غير موجود قبل تطبيق الهجرة 0006 — نعتبر ألا عملية دفع
+      if (error) return null;
+      const rows = (data ?? []) as Record<string, unknown>[];
+      const active = rows.find((r) => ["pending", "submitted", "paid"].includes(String(r.status)));
+      const row = active ?? rows[0];
+      return row ? mapPayment(row) : null;
+    },
+  });
+}
+
+/** يرجع العملية النشطة أو ينشئ واحدة بالمبلغ الحالي من الإعدادات */
+export function useRequestEventPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ eventId }: { eventId: number }): Promise<EventPayment> => {
+      const { data, error } = await supabase.rpc("request_event_payment", { p_event_id: eventId });
+      throwIf(error);
+      return mapPayment(singleRow(data));
+    },
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: getGetEventPaymentQueryKey(vars.eventId) }),
+  });
+}
+
+export const PROOF_UPLOAD_LIMIT = {
+  maxBytes: 5 * 1024 * 1024,
+  label: "5 ميجابايت",
+  types: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
+} as const;
+
+/** يرفع إثبات التحويل إلى bucket خاص ويعيد مساره (لا رابطاً عاماً) */
+export async function uploadPaymentProof(userId: string, file: File): Promise<string> {
+  if (file.size > PROOF_UPLOAD_LIMIT.maxBytes) {
+    throw new Error(
+      `حجم الملف يتجاوز الحد المسموح (${PROOF_UPLOAD_LIMIT.label}). اختر صورة أصغر.`,
+    );
+  }
+  const type = file.type || "";
+  if (!PROOF_UPLOAD_LIMIT.types.includes(type as never)) {
+    throw new Error("الإثبات يجب أن يكون صورة (JPG/PNG/WEBP) أو ملف PDF");
+  }
+  const ext = type === "application/pdf" ? "pdf" : (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage
+    .from("payment-proofs").upload(path, file, { contentType: type, upsert: false });
+  throwIf(error);
+  return path;
+}
+
+/** رابط مؤقت لعرض الإثبات (المالك أو الأدمن فقط بحكم سياسة التخزين) */
+export async function getPaymentProofUrl(path: string): Promise<string> {
+  const { data, error } = await supabase.storage
+    .from("payment-proofs").createSignedUrl(path, 60 * 10);
+  throwIf(error);
+  return data?.signedUrl ?? "";
+}
+
+/** تقديم الإثبات: الحالة تصبح «بانتظار المراجعة» لا «مدفوعة» */
+export function useSubmitEventPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      paymentId,
+      reference,
+      proofPath,
+    }: {
+      paymentId: number;
+      eventId: number;
+      reference: string;
+      proofPath: string;
+    }): Promise<EventPayment> => {
+      const { data, error } = await supabase.rpc("submit_event_payment", {
+        p_payment_id: paymentId,
+        p_reference: reference,
+        p_proof_path: proofPath,
+      });
+      throwIf(error);
+      return mapPayment(singleRow(data));
+    },
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: getGetEventPaymentQueryKey(vars.eventId) }),
+  });
+}
+
+/** قائمة الأدمن: كل العمليات مع بيانات المناسبة وصاحبها */
+export function useListAdminPayments() {
+  return useQuery({
+    queryKey: getListAdminPaymentsQueryKey(),
+    queryFn: async (): Promise<AdminEventPayment[]> => {
+      const { data, error } = await supabase
+        .from("event_payments")
+        .select("*, events(title, event_date), profiles(name, email)")
+        .order("id", { ascending: false });
+      throwIf(error);
+      return ((data ?? []) as Record<string, unknown>[]).map((r) => {
+        const ev = (r.events ?? {}) as Record<string, unknown>;
+        const pr = (r.profiles ?? {}) as Record<string, unknown>;
+        return {
+          ...mapPayment(r),
+          eventTitle: String(ev.title ?? "مناسبة محذوفة"),
+          eventDate: ev.event_date ? String(ev.event_date) : null,
+          userName: String(pr.name ?? ""),
+          userEmail: String(pr.email ?? ""),
+        };
+      });
+    },
+  });
+}
+
+export function useReviewEventPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      paymentId,
+      approve,
+      note,
+    }: {
+      paymentId: number;
+      approve: boolean;
+      note?: string;
+    }): Promise<EventPayment> => {
+      const { data, error } = await supabase.rpc("review_event_payment", {
+        p_payment_id: paymentId,
+        p_approve: approve,
+        p_note: note ?? "",
+      });
+      throwIf(error);
+      return mapPayment(singleRow(data));
+    },
+    onSuccess: (payment) => {
+      qc.invalidateQueries({ queryKey: getListAdminPaymentsQueryKey() });
+      qc.invalidateQueries({ queryKey: getGetEventPaymentQueryKey(payment.eventId) });
+    },
+  });
+}
+
+/** عرض الحالة بالعربية في كل الواجهات */
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  pending: "بانتظار الدفع",
+  submitted: "بانتظار مراجعة الإدارة",
+  paid: "مدفوعة",
+  rejected: "مرفوضة",
+  cancelled: "ملغاة",
+};
+
+export const SENDING_STATUS_LABELS: Record<SendingStatus, string> = {
+  not_started: "لم يبدأ الإرسال",
+  in_progress: "الإرسال جارٍ",
+  completed: "اكتمل الإرسال",
+};
+
+/** ترجمة أخطاء دوال الدفع إلى رسائل عربية */
+export function paymentErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  if (raw.includes("PAYMENT_REQUIRED")) return "يجب دفع رسوم الإرسال وموافقة الإدارة قبل إرسال الدعوات.";
+  if (raw.includes("PROOF_REQUIRED")) return "أرفق صورة إثبات التحويل قبل الإرسال للمراجعة.";
+  if (raw.includes("PAYMENT_NOT_EDITABLE")) return "هذه العملية قيد المراجعة أو مكتملة ولا يمكن تعديلها.";
+  if (raw.includes("PAYMENT_ALREADY_REVIEWED")) return "تمت مراجعة هذه العملية مسبقاً.";
+  if (raw.includes("EVENT_NOT_FOUND")) return "المناسبة غير موجودة أو ليست لك.";
+  if (raw.includes("ADMIN_ONLY")) return "هذه العملية للإدارة فقط.";
+  if (raw.includes("does not exist") || raw.includes("Could not find")) {
+    return "نظام الدفع غير مفعّل بعد في قاعدة البيانات (الهجرة 0006 لم تُطبَّق).";
+  }
+  return raw || "حدث خطأ غير متوقع";
 }
