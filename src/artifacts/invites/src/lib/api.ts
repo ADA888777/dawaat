@@ -1034,6 +1034,8 @@ export interface AppSettings {
   /** شريط الإعلانات المتحرك: الإظهار والسرعة (بكسل/ثانية) */
   tickerEnabled: boolean;
   tickerSpeed: number;
+  /** ثواني عرض كل إعلان قبل الانتقال للتالي */
+  announcementInterval: number;
   /** مفاتيح تفعيل/تعطيل الميزات — تُخزَّن jsonb ويعدّلها الأدمن فقط */
   featureFlags: FeatureFlags;
 }
@@ -1062,7 +1064,7 @@ export const FEATURE_LABELS: Record<FeatureKey, { label: string; hint: string }>
   qr_code: { label: "رمز QR ورابط الدعوة", hint: "زر «رمز QR والرابط» في صفحة المناسبة." },
   whatsapp_send: { label: "إرسال الدعوات عبر واتساب", hint: "زر «إرسال الدعوات» وقائمة الإرسال." },
   subscription_page: { label: "صفحة الباقات", hint: "رابط «الباقة» في قائمة المستخدم." },
-  announcements_bar: { label: "شريط الإعلانات", hint: "الشريط المتحرك في الموقع وواجهة المستخدم." },
+  announcements_bar: { label: "شريط الإعلانات", hint: "بطاقة الإعلانات في الصفحة الرئيسية ولوحة العميل." },
   public_rsvp: { label: "رد المدعوين على الدعوة", hint: "أزرار «سأحضر/أعتذر» في صفحة الدعوة العامة." },
 };
 
@@ -1113,6 +1115,7 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   paymentInstructions: "payment_instructions",
   tickerEnabled: "ticker_enabled",
   tickerSpeed: "ticker_speed",
+  announcementInterval: "announcement_interval",
   featureFlags: "feature_flags",
 };
 
@@ -1146,6 +1149,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   paymentInstructions: "",
   tickerEnabled: true,
   tickerSpeed: 60,
+  announcementInterval: 5,
   featureFlags: { ...FEATURE_DEFAULTS },
 };
 
@@ -1524,8 +1528,29 @@ export const AUDIENCE_LABELS: Record<AnnouncementAudience, string> = {
   paid: "أصحاب الباقة المدفوعة",
 };
 
+export type AnnouncementIcon =
+  | "megaphone" | "sparkles" | "gift" | "crown" | "calendar" | "percent" | "star" | "party";
+
+export const ANNOUNCEMENT_ICONS: AnnouncementIcon[] = [
+  "megaphone", "sparkles", "gift", "crown", "calendar", "percent", "star", "party",
+];
+
+export const ANNOUNCEMENT_ICON_LABELS: Record<AnnouncementIcon, string> = {
+  megaphone: "مكبّر صوت", sparkles: "بريق", gift: "هدية", crown: "تاج",
+  calendar: "تقويم", percent: "خصم", star: "نجمة", party: "احتفال",
+};
+
 export interface Announcement {
   id: number;
+  /** عنوان البطاقة — الأساس؛ text القديم يبقى للتوافق مع بيانات سابقة */
+  title: string;
+  description: string;
+  imageUrl: string;
+  icon: AnnouncementIcon;
+  buttonText: string;
+  buttonUrl: string;
+  showOnHome: boolean;
+  showOnDashboard: boolean;
   text: string;
   link: string;
   active: boolean;
@@ -1538,10 +1563,22 @@ export interface Announcement {
 }
 
 function mapAnnouncement(r: Record<string, unknown>): Announcement {
+  const icon = String(r.icon ?? "megaphone") as AnnouncementIcon;
+  const legacyText = String(r.text ?? "");
+  const legacyLink = String(r.link ?? "");
   return {
     id: Number(r.id),
-    text: String(r.text ?? ""),
-    link: String(r.link ?? ""),
+    // بيانات ما قبل 0009 لا تحمل عنواناً، فيُستخدم النص القديم عنواناً
+    title: String(r.title ?? "").trim() || legacyText,
+    description: String(r.description ?? ""),
+    imageUrl: String(r.image_url ?? ""),
+    icon: ANNOUNCEMENT_ICONS.includes(icon) ? icon : "megaphone",
+    buttonText: String(r.button_text ?? ""),
+    buttonUrl: String(r.button_url ?? "").trim() || legacyLink,
+    showOnHome: r.show_on_home === undefined ? true : Boolean(r.show_on_home),
+    showOnDashboard: r.show_on_dashboard === undefined ? true : Boolean(r.show_on_dashboard),
+    text: legacyText,
+    link: legacyLink,
     active: Boolean(r.active),
     sortOrder: Number(r.sort_order ?? 0),
     startsAt: r.starts_at ? String(r.starts_at) : null,
@@ -1581,9 +1618,36 @@ export function useListAnnouncements() {
   });
 }
 
+/**
+ * الإعلانات المعروضة في مكان معيّن الآن.
+ * سياسة RLS تكفّلت بالفئة والجدولة، وهنا نرشّح المعطّل (يراه الأدمن وحده)
+ * والمكان، ونرتّب بالأولوية.
+ */
+export function visibleAnnouncements(
+  list: Announcement[] | undefined,
+  place: "home" | "dashboard",
+): Announcement[] {
+  const now = Date.now();
+  return (list ?? [])
+    .filter((a) => {
+      if (!a.active || !a.title.trim()) return false;
+      if (place === "home" ? !a.showOnHome : !a.showOnDashboard) return false;
+      if (a.startsAt && new Date(a.startsAt).getTime() > now) return false;
+      if (a.endsAt && new Date(a.endsAt).getTime() < now) return false;
+      return true;
+    })
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+}
+
 export interface AnnouncementPayload {
-  text: string;
-  link?: string;
+  title: string;
+  description?: string;
+  imageUrl?: string;
+  icon?: AnnouncementIcon;
+  buttonText?: string;
+  buttonUrl?: string;
+  showOnHome?: boolean;
+  showOnDashboard?: boolean;
   active?: boolean;
   sortOrder?: number;
   startsAt?: string | null;
@@ -1593,8 +1657,14 @@ export interface AnnouncementPayload {
 
 function announcementRow(data: Partial<AnnouncementPayload>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
-  if (data.text !== undefined) row.text = data.text.trim().slice(0, 200);
-  if (data.link !== undefined) row.link = data.link.trim().slice(0, 500);
+  if (data.title !== undefined) row.title = data.title.trim().slice(0, 120);
+  if (data.description !== undefined) row.description = data.description.trim().slice(0, 300);
+  if (data.imageUrl !== undefined) row.image_url = data.imageUrl.trim().slice(0, 1000);
+  if (data.icon !== undefined) row.icon = data.icon;
+  if (data.buttonText !== undefined) row.button_text = data.buttonText.trim().slice(0, 40);
+  if (data.buttonUrl !== undefined) row.button_url = data.buttonUrl.trim().slice(0, 500);
+  if (data.showOnHome !== undefined) row.show_on_home = data.showOnHome;
+  if (data.showOnDashboard !== undefined) row.show_on_dashboard = data.showOnDashboard;
   if (data.active !== undefined) row.active = data.active;
   if (data.sortOrder !== undefined) row.sort_order = data.sortOrder;
   if (data.startsAt !== undefined) row.starts_at = data.startsAt || null;
