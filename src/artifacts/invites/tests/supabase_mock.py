@@ -163,7 +163,18 @@ class Handler(BaseHTTPRequestHandler):
         c, cur, _ = self._conn()
         params = []
         where = build_filters(qs, params)
-        sql = f'select {build_select(qs)} from public."{table}"'
+        select = build_select(qs)
+        # علاقات مضمّنة مبسّطة: event_payments مع المناسبة وصاحبها (كما يطلبها الأدمن)
+        sel_raw = qs.get("select", ["*"])[0]
+        if table == "event_payments" and "(" in sel_raw:
+            select = ('t.*, (select to_jsonb(e) - \'id\' from (select title, event_date '
+                      'from public.events where id = t.event_id) e) as events, '
+                      '(select to_jsonb(p) from (select name, email '
+                      'from public.profiles where id = t.user_id) p) as profiles')
+            table_sql = f'public."{table}" t'
+        else:
+            table_sql = f'public."{table}"'
+        sql = f'select {select} from {table_sql}'
         if where: sql += " where " + " and ".join(where)
         if "order" in qs:
             col, _, dirn = qs["order"][0].partition(".")
@@ -280,6 +291,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/auth/v1/recover":
             return self._send(200, {})
+
+        if path.startswith("/storage/v1/object/sign/"):
+            # رابط موقّت: يتحقق أن المستخدم يرى الملف عبر سياسة select على التخزين
+            rest = path[len("/storage/v1/object/sign/"):]
+            bucket, _, name = rest.partition("/")
+            c, cur, _ = self._conn()
+            cur.execute("select 1 from storage.objects where bucket_id=%s and name=%s", (bucket, name))
+            found = cur.fetchone(); c.close()
+            if not found: return self._send(400, {"message": "Object not found"})
+            return self._send(200, {"signedURL": f"/object/sign/{bucket}/{name}?token=local"})
 
         if path.startswith("/storage/v1/object/"):
             rest = path[len("/storage/v1/object/"):]
