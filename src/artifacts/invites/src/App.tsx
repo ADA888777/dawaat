@@ -169,6 +169,7 @@ function AppRoutes() {
         <Route path="/subscription"><ProtectedRoute component={SubscriptionPage} requiredRole="user" /></Route>
         <Route path="/settings"><ProtectedRoute component={SettingsPage} /></Route>
         <Route path="/admin"><ProtectedRoute component={AdminPage} requiredRole="admin" /></Route>
+        <Route path="/admin/:section"><ProtectedRoute component={AdminPage} requiredRole="admin" /></Route>
 
         {/* Public Invite Route */}
         <Route path="/invite/:slug" component={PublicInvite} />
