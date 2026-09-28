@@ -9,6 +9,7 @@ import {
   useBulkCreateGuests,
   useMarkInviteStatus,
   useGetAppSettings,
+  useFeature,
   useGetEventPayment,
   paymentErrorMessage,
   PAYMENT_STATUS_LABELS,
@@ -120,6 +121,10 @@ export default function EventDetail() {
   // الحماية الفعلية في قاعدة البيانات (PAYMENT_REQUIRED)؛ هنا نقود المستخدم
   // إلى شاشة الدفع بدل ترك الزر يفشل، ونخفي مسارات المشاركة قبل الدفع.
   const { data: appSettings } = useGetAppSettings();
+  // مفاتيح الميزات من إعدادات الأدمن
+  const featContacts = useFeature("contacts_import");
+  const featQr = useFeature("qr_code");
+  const featSend = useFeature("whatsapp_send");
   const {
     data: payment,
     isLoading: isLoadingPayment,
@@ -484,6 +489,7 @@ export default function EventDetail() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            {featQr && (
             <Button
               variant="outline"
               className="border-gray-200"
@@ -497,6 +503,7 @@ export default function EventDetail() {
               )}
               رمز QR والرابط
             </Button>
+            )}
             <Button
               variant="outline"
               className="border-gray-200"
@@ -576,6 +583,7 @@ export default function EventDetail() {
                 <CheckSquare className="ml-2 h-4 w-4" />
                 {allVisibleSelected ? "إلغاء تحديد الكل" : "تحديد الكل"}
               </Button>
+              {featSend && (
               <Button
                 onClick={startSending}
                 disabled={selectedIds.length === 0}
@@ -589,6 +597,8 @@ export default function EventDetail() {
                 إرسال الدعوات
                 {selectedIds.length > 0 ? " (" + selectedIds.length + ")" : ""}
               </Button>
+              )}
+              {featContacts && (
               <Button
                 onClick={() => void openImportDialog()}
                 disabled={isPickingContacts}
@@ -606,6 +616,7 @@ export default function EventDetail() {
                 )}
                 جهات الاتصال
               </Button>
+              )}
             </div>
           </div>
 
@@ -706,6 +717,7 @@ export default function EventDetail() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-1">
+                            {featSend && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -715,6 +727,7 @@ export default function EventDetail() {
                             >
                               <MessageCircle className="h-4 w-4" />
                             </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
