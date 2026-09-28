@@ -4,7 +4,6 @@ import { useGetMe, useGetAppSettings, useFeature } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Home, Calendar, CreditCard, Shield, Settings, LogOut, Menu, X, Loader2 } from "lucide-react";
 import { SidebarContact } from "./sidebar-contact";
-import { AnnouncementTicker } from "@/components/announcement-ticker";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -43,10 +42,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
-      {/* شريط الإعلانات: أعلى واجهة المستخدم، داخل التدفق فلا يغطي المحتوى */}
-      <AnnouncementTicker position="top" />
-    <div className="flex flex-1 flex-col md:flex-row">
+    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans">
       {/* Mobile Header */}
       <div className="md:hidden bg-ink text-white p-4 flex items-center justify-between z-20">
         <span className="text-2xl font-serif text-gold font-bold">{siteName}</span>
@@ -128,7 +124,6 @@ export function AppLayout({ children }: AppLayoutProps) {
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
-    </div>
     </div>
   );
 }
