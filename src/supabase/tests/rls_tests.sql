@@ -446,6 +446,99 @@ begin
   if v_cnt <> 2 then raise exception 'فشل 18و: تعديلات الأدمن لم تُطبَّق (%)', v_cnt; end if;
   raise notice '✅ 18: الإعلانات — النشط للجميع، والإدارة للأدمن فقط';
 
+  -- =================================================================
+  -- اختبار 19 [إعلانات مجدولة/فئات]: الظهور يُفرض في قاعدة البيانات
+  -- =================================================================
+  reset role;
+  delete from public.announcements;
+  insert into public.announcements (text, active, sort_order, starts_at, ends_at, audience) values
+    ('للجميع',          true, 1, null, null, 'all'),
+    ('للزوار فقط',      true, 2, null, null, 'visitors'),
+    ('للمسجلين فقط',    true, 3, null, null, 'users'),
+    ('للباقة المدفوعة', true, 4, null, null, 'paid'),
+    ('منتهٍ',           true, 5, now() - interval '2 days', now() - interval '1 day', 'all'),
+    ('لم يبدأ',         true, 6, now() + interval '1 day', null, 'all');
+
+  -- الزائر: بلا جلسة إطلاقاً (يُمسح معرّف الجلسة المتبقي من الاختبار السابق)
+  perform set_config('request.jwt.claim.sub', '', true);
+  set local role anon;
+  select string_agg(text, ',' order by sort_order) into v_slug from public.announcements;
+  if v_slug <> 'للجميع,للزوار فقط' then raise exception 'فشل 19أ: الزائر يرى: %', v_slug; end if;
+
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  select string_agg(text, ',' order by sort_order) into v_slug from public.announcements;
+  if v_slug <> 'للجميع,للمسجلين فقط' then raise exception 'فشل 19ب: المستخدم المجاني يرى: %', v_slug; end if;
+
+  reset role;
+  perform set_config('app.trusted_plan_change', 'on', true);
+  update public.profiles set plan = 'paid' where id = '22222222-2222-2222-2222-222222222222';
+  perform set_config('app.trusted_plan_change', '', true);
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  select string_agg(text, ',' order by sort_order) into v_slug from public.announcements;
+  if v_slug <> 'للجميع,للمسجلين فقط,للباقة المدفوعة' then
+    raise exception 'فشل 19ج: المستخدم المدفوع يرى: %', v_slug;
+  end if;
+
+  perform set_config('request.jwt.claim.sub','33333333-3333-3333-3333-333333333333', true);
+  select count(*) into v_cnt from public.announcements;
+  if v_cnt <> 6 then raise exception 'فشل 19د: الأدمن يرى % بدل 6', v_cnt; end if;
+  reset role;
+  raise notice '✅ 19: جدولة الإعلانات وفئاتها تُفرض في RLS';
+
+  -- =================================================================
+  -- اختبار 20 [أمان الأدمن]: كل وظيفة إدارية مرفوضة للمستخدم العادي
+  -- =================================================================
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+
+  begin
+    insert into public.templates (name, category, preview_image) values ('اختراق','general','x');
+    raise exception 'فشل 20أ: مستخدم عادي أضاف قالباً!';
+  exception when others then
+    if sqlerrm like 'فشل 20%' then raise; end if;
+  end;
+
+  update public.templates set name = 'اختراق';
+  update public.app_settings set feature_flags = '{"hacked":true}'::jsonb, send_fee_amount = 0;
+  reset role;
+  select count(*) into v_cnt from public.templates where name = 'اختراق';
+  if v_cnt <> 0 then raise exception 'فشل 20ب: مستخدم عادي عدّل قالباً!'; end if;
+  select count(*) into v_cnt from public.app_settings where feature_flags ? 'hacked';
+  if v_cnt <> 0 then raise exception 'فشل 20ج: مستخدم عادي عدّل مفاتيح الميزات!'; end if;
+
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  begin
+    perform public.admin_set_free_limit(100, true);
+    raise exception 'فشل 20د: مستخدم عادي غيّر حد الباقة المجانية!';
+  exception when others then
+    if sqlerrm like 'فشل 20%' then raise; end if;
+    if sqlerrm <> 'ADMIN_ONLY' then raise exception 'فشل 20د: خطأ غير متوقع: %', sqlerrm; end if;
+  end;
+  begin
+    perform public.admin_set_plan('22222222-2222-2222-2222-222222222222', 'paid', 12);
+    raise exception 'فشل 20هـ: مستخدم عادي منح نفسه باقة مدفوعة!';
+  exception when others then
+    if sqlerrm like 'فشل 20%' then raise; end if;
+  end;
+
+  -- ولا يرى مستخدمين آخرين أو مدفوعاتهم أو مناسباتهم
+  select count(*) into v_cnt from public.profiles;
+  if v_cnt <> 1 then raise exception 'فشل 20و: المستخدم يرى % ملف بدل 1', v_cnt; end if;
+
+  -- الأدمن يستطيع كل ذلك
+  perform set_config('request.jwt.claim.sub','33333333-3333-3333-3333-333333333333', true);
+  select public.admin_set_free_limit(2, true) into v_cnt;
+  update public.app_settings set feature_flags = '{"qr_code":false}'::jsonb;
+  reset role;
+  select free_events_limit into v_limit from public.app_settings;
+  if v_limit <> 2 then raise exception 'فشل 20ز: الأدمن لم يستطع تغيير الحد'; end if;
+  select count(*) into v_cnt from public.app_settings where feature_flags ->> 'qr_code' = 'false';
+  if v_cnt <> 1 then raise exception 'فشل 20ح: الأدمن لم يستطع تعديل مفاتيح الميزات'; end if;
+  raise notice '✅ 20: الوظائف الإدارية محمية في قاعدة البيانات لا في الواجهة فقط';
+
   raise notice '';
   raise notice '════════════════════════════════';
   raise notice '  نجحت جميع اختبارات RLS ✅';
