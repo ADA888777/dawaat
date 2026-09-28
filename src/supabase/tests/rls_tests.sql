@@ -539,6 +539,50 @@ begin
   if v_cnt <> 1 then raise exception 'فشل 20ح: الأدمن لم يستطع تعديل مفاتيح الميزات'; end if;
   raise notice '✅ 20: الوظائف الإدارية محمية في قاعدة البيانات لا في الواجهة فقط';
 
+  -- =================================================================
+  -- اختبار 21 [بطاقات الإعلانات]: عنوان/وصف/زر وأماكن العرض
+  -- =================================================================
+  reset role;
+  delete from public.announcements;
+  insert into public.announcements (title, description, icon, button_text, button_url, show_on_home, show_on_dashboard)
+  values ('عرض خاص', 'خصم على الباقة الماسية', 'gift', 'اعرف أكثر', '/subscription', true, false);
+
+  select show_on_home::text || '|' || show_on_dashboard::text || '|' || icon || '|' || button_text
+    into v_slug from public.announcements;
+  if v_slug <> 'true|false|gift|اعرف أكثر' then
+    raise exception 'فشل 21أ: القيم المحفوظة %', v_slug;
+  end if;
+
+  -- إعلان بلا عنوان ولا نص مرفوض
+  begin
+    insert into public.announcements (title) values ('   ');
+    raise exception 'فشل 21ب: قُبل إعلان بلا محتوى!';
+  exception when others then
+    if sqlerrm like 'فشل 21%' then raise; end if;
+  end;
+
+  -- الافتراضي: يظهر في الموقع ولوحة العميل معاً
+  insert into public.announcements (title) values ('إعلان افتراضي');
+  select show_on_home::text || '|' || show_on_dashboard::text into v_slug
+    from public.announcements where title = 'إعلان افتراضي';
+  if v_slug <> 'true|true' then raise exception 'فشل 21ج: الافتراضي %', v_slug; end if;
+
+  -- المستخدم العادي يقرأ ولا يكتب
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  select count(*) into v_cnt from public.announcements;
+  if v_cnt <> 2 then raise exception 'فشل 21د: المستخدم يرى % بدل 2', v_cnt; end if;
+  begin
+    update public.announcements set button_url = 'https://evil.test';
+    if (select count(*) from public.announcements where button_url = 'https://evil.test') > 0 then
+      raise exception 'فشل 21هـ: مستخدم عادي عدّل زر الإعلان!';
+    end if;
+  exception when others then
+    if sqlerrm like 'فشل 21%' then raise; end if;
+  end;
+  reset role;
+  raise notice '✅ 21: بطاقات الإعلانات — الحقول الجديدة وأماكن العرض والحماية';
+
   raise notice '';
   raise notice '════════════════════════════════';
   raise notice '  نجحت جميع اختبارات RLS ✅';
