@@ -1,6 +1,7 @@
 import { AppLayout } from "@/components/layout/app-layout";
 import { useGetMe, useGetAdminStats, useListAdminUsers, useListAdminEvents, useListTemplates, useCreateTemplate, useUpdateTemplate, useDeleteTemplate, useUpdateAdminUser, useDeleteAdminEvent } from "@/lib/api";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { AdminPayments } from "./payments";
 import { Link, Redirect } from "wouter";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loader2, Users, Calendar, Palette, Crown, Trash2, Edit, Plus } from "lucide-react";
@@ -62,16 +63,18 @@ export default function AdminPage() {
         ) : null}
 
         <Tabs defaultValue="templates" className="w-full">
-          <TabsList className="grid grid-cols-3 max-w-2xl bg-white border border-gray-100">
+          <TabsList className="grid grid-cols-4 max-w-3xl bg-white border border-gray-100">
             <TabsTrigger value="templates">القوالب</TabsTrigger>
             <TabsTrigger value="users">المستخدمين</TabsTrigger>
             <TabsTrigger value="events">المناسبات</TabsTrigger>
+            <TabsTrigger value="payments">المدفوعات</TabsTrigger>
           </TabsList>
           
           <div className="mt-6 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <TabsContent value="templates"><AdminTemplates /></TabsContent>
             <TabsContent value="users"><AdminUsers /></TabsContent>
             <TabsContent value="events"><AdminEvents /></TabsContent>
+            <TabsContent value="payments"><AdminPayments /></TabsContent>
           </div>
         </Tabs>
       </div>
