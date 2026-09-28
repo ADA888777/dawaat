@@ -1,12 +1,11 @@
 import { lazy, Suspense } from "react";
-import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Loader2, Wrench } from "lucide-react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { useGetMe, useGetAppSettings } from "@/lib/api";
-import { AnnouncementTicker } from "@/components/announcement-ticker";
 
 // صفحات محمّلة مباشرة: الواجهة العامة وصفحة الدعوة — أخف مسار ممكن
 import Home from "@/pages/home";
@@ -124,24 +123,6 @@ const { data: settings } = useGetAppSettings();
   return <Component />;
 }
 
-/** المسارات التي تُعرض داخل واجهة المستخدم (AppLayout) — الشريط فيها أعلى الصفحة */
-const APP_ROUTE_PREFIXES = ["/dashboard", "/events", "/subscription", "/settings", "/admin"];
-
-/**
- * شريط الإعلانات في واجهة الموقع العامة: أسفل الشاشة.
- * لا يظهر في صفحات الدعوة العامة (/invite/…) لأنها موجّهة للمدعو لا للعميل،
- * ولا في واجهة المستخدم لأن AppLayout يعرضه أعلى الصفحة.
- */
-function PublicTicker() {
-  const [location] = useLocation();
-  const { user, isLoaded } = useAuth();
-  if (location.startsWith("/invite")) return null;
-  if (APP_ROUTE_PREFIXES.some((p) => location === p || location.startsWith(p + "/"))) return null;
-  // الصفحة الرئيسية تتحول إلى لوحة المستخدم عند تسجيل الدخول
-  if (location === "/" && (!isLoaded || user)) return null;
-  return <AnnouncementTicker position="bottom" />;
-}
-
 function AppRoutes() {
   return (
     <TooltipProvider>
@@ -177,7 +158,6 @@ function AppRoutes() {
         <Route component={NotFound} />
       </Switch>
       </Suspense>
-      <PublicTicker />
       <Toaster />
     </TooltipProvider>
   );
