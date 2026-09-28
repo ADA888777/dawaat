@@ -33,6 +33,8 @@ do $$
 declare
   v_cnt int; v_limit int; v_slug text; v_slug2 text;
   v_token uuid; v_status public.attendance_status; v_ok boolean;
+  v_event bigint; v_pay bigint; v_pay2 bigint; v_ids bigint[];
+  v_pstatus public.payment_status; v_sstatus public.sending_status; v_amount numeric;
 begin
   -- =================================================================
   -- اختبار 1 [ح/ع]: بوب لا يرى مناسبات أليس
@@ -194,11 +196,15 @@ begin
   raise notice '✅ 11: get_guest_by_token لا ترجع رقم الجوال';
 
   -- =================================================================
-  -- اختبار 12 [ع-1]: الـ Buckets الأربعة موجودة بالإعدادات الصحيحة
+  -- اختبار 12 [ع-1]: الـ Buckets الخمسة موجودة بالإعدادات الصحيحة
   -- =================================================================
   reset role;
   select count(*) into v_cnt from storage.buckets;
-  if v_cnt <> 4 then raise exception 'فشل 12: % bucket بدل 4', v_cnt; end if;
+  if v_cnt <> 5 then raise exception 'فشل 12: % bucket بدل 5', v_cnt; end if;
+
+  select count(*) into v_cnt from storage.buckets
+   where id = 'payment-proofs' and public = false;
+  if v_cnt <> 1 then raise exception 'فشل 12أ: payment-proofs ليس خاصاً'; end if;
 
   select count(*) into v_cnt from storage.buckets
    where id = 'event-files' and public = false;
@@ -207,7 +213,7 @@ begin
   select count(*) into v_cnt from pg_policies
    where schemaname = 'storage' and cmd = 'SELECT';
   if v_cnt < 1 then raise exception 'فشل 12ج: لا توجد سياسة قراءة على التخزين'; end if;
-  raise notice '✅ 12: الـ Buckets الأربعة وسياساتها موجودة';
+  raise notice '✅ 12: الـ Buckets الخمسة وسياساتها موجودة';
 
   -- =================================================================
   -- اختبار 13: الأدمن يرى كل شيء
@@ -299,6 +305,108 @@ begin
   select count(*) into v_cnt from public.app_settings where support_snapchat = 'dawaat_test';
   if v_cnt <> 1 then raise exception 'فشل 16د: الأدمن لم يستطع تعديل الإعدادات'; end if;
   raise notice '✅ 16: app_settings — قراءة للجميع، تعديل للأدمن فقط، صف واحد';
+
+
+  -- =================================================================
+  -- اختبار 17 [دفع]: لا إرسال قبل الدفع — والدفع يمر بموافقة الأدمن
+  -- =================================================================
+  reset role;
+  update public.app_settings set send_fee_amount = 50;
+
+  -- أليس تطلب الدفع لمناسبتها: عملية pending بالمبلغ الحالي
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', true);
+  select id into v_event from public.events where title = 'زفاف أليس';
+  select id, status, amount into v_pay, v_pstatus, v_amount
+    from public.request_event_payment(v_event);
+  if v_pstatus <> 'pending' or v_amount <> 50 then
+    raise exception 'فشل 17أ: العملية % بمبلغ % بدل pending/50', v_pstatus, v_amount;
+  end if;
+
+  -- الطلب مرة أخرى يرجع نفس العملية لا عملية جديدة
+  select id into v_pay2 from public.request_event_payment(v_event);
+  if v_pay2 <> v_pay then raise exception 'فشل 17ب: أُنشئت عملية دفع ثانية للمناسبة نفسها'; end if;
+
+  -- تجهيز الدعوات قبل الدفع مرفوض
+  select array_agg(id) into v_ids from public.guests where event_id = v_event;
+  begin
+    perform public.mark_guests_invite_status(v_ids, 'prepared');
+    raise exception 'فشل 17ج: سُجّل تجهيز الدعوات قبل الدفع!';
+  exception when others then
+    if sqlerrm like 'فشل 17%' then raise; end if;
+    if sqlerrm <> 'PAYMENT_REQUIRED' then
+      raise exception 'فشل 17ج: خطأ غير متوقع: %', sqlerrm;
+    end if;
+  end;
+
+  -- بوب لا يستطيع تقديم إثبات على عملية أليس
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  begin
+    perform public.submit_event_payment(v_pay, 'REF1',
+      '22222222-2222-2222-2222-222222222222/x.png');
+    raise exception 'فشل 17د: بوب عدّل عملية دفع أليس!';
+  exception when others then
+    if sqlerrm like 'فشل 17%' then raise; end if;
+  end;
+  select count(*) into v_cnt from public.event_payments;
+  if v_cnt <> 0 then raise exception 'فشل 17هـ: بوب يرى عمليات دفع غيره'; end if;
+
+  -- أليس تقدّم الإثبات: الحالة submitted وليست paid
+  perform set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', true);
+  begin
+    perform public.submit_event_payment(v_pay, 'REF1', '');
+    raise exception 'فشل 17و: قُبل تقديم بلا إثبات!';
+  exception when others then
+    if sqlerrm like 'فشل 17%' then raise; end if;
+  end;
+  select status into v_pstatus from public.submit_event_payment(v_pay, 'REF1',
+    '11111111-1111-1111-1111-111111111111/proof.png');
+  if v_pstatus <> 'submitted' then
+    raise exception 'فشل 17ز: الحالة بعد التقديم % بدل submitted', v_pstatus;
+  end if;
+
+  -- ما زال الإرسال مقفلاً
+  if public.event_sending_unlocked(v_event) then
+    raise exception 'فشل 17ح: الإرسال مفتوح قبل موافقة الأدمن!';
+  end if;
+
+  -- المستخدم العادي لا يستطيع الموافقة على نفسه
+  begin
+    perform public.review_event_payment(v_pay, true, '');
+    raise exception 'فشل 17ط: مستخدم عادي وافق على دفعه بنفسه!';
+  exception when others then
+    if sqlerrm like 'فشل 17%' then raise; end if;
+  end;
+
+  -- الأدمن يوافق ← paid ← الإرسال يُفتح ويُسجَّل
+  perform set_config('request.jwt.claim.sub','33333333-3333-3333-3333-333333333333', true);
+  select status into v_pstatus from public.review_event_payment(v_pay, true, 'تم التحقق');
+  if v_pstatus <> 'paid' then raise exception 'فشل 17ي: الحالة % بدل paid', v_pstatus; end if;
+
+  perform set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', true);
+  if not public.event_sending_unlocked(v_event) then
+    raise exception 'فشل 17ك: الإرسال مقفل بعد الدفع!';
+  end if;
+  select public.mark_guests_invite_status(v_ids, 'sent') into v_cnt;
+  if v_cnt <> array_length(v_ids, 1) then
+    raise exception 'فشل 17ل: سُجّل % من % بعد الدفع', v_cnt, array_length(v_ids, 1);
+  end if;
+  select sending_status into v_sstatus from public.event_payments where id = v_pay;
+  if v_sstatus <> 'completed' then
+    raise exception 'فشل 17م: حالة الإرسال % بدل completed', v_sstatus;
+  end if;
+
+  -- رسوم صفر = الإرسال مجاني بلا شاشة دفع (مناسبة بوب)
+  reset role;
+  update public.app_settings set send_fee_amount = 0;
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  select id into v_event from public.events where title = 'زفاف بوب';
+  select array_agg(id) into v_ids from public.guests where event_id = v_event;
+  select public.mark_guests_invite_status(v_ids, 'prepared') into v_cnt;
+  if v_cnt <> array_length(v_ids, 1) then raise exception 'فشل 17ن: الإرسال مقفل رغم أن الرسوم صفر'; end if;
+  reset role;
+  raise notice '✅ 17: رسوم الإرسال — لا إرسال قبل موافقة الأدمن، ورسوم 0 = مجاني';
 
   raise notice '';
   raise notice '════════════════════════════════';
