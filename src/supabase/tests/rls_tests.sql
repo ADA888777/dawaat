@@ -408,6 +408,44 @@ begin
   reset role;
   raise notice '✅ 17: رسوم الإرسال — لا إرسال قبل موافقة الأدمن، ورسوم 0 = مجاني';
 
+  -- =================================================================
+  -- اختبار 18 [إعلانات]: النشط يراه الجميع، والأدمن وحده يرى المعطّل ويعدّل
+  -- =================================================================
+  reset role;
+  insert into public.announcements (text, active, sort_order) values
+    ('عرض خاص', true, 1), ('إعلان مخفي', false, 2);
+
+  set local role anon;
+  select count(*) into v_cnt from public.announcements;
+  if v_cnt <> 1 then raise exception 'فشل 18أ: الزائر يرى % إعلان بدل 1', v_cnt; end if;
+
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  select count(*) into v_cnt from public.announcements;
+  if v_cnt <> 1 then raise exception 'فشل 18ب: المستخدم يرى % إعلان بدل 1', v_cnt; end if;
+  begin
+    insert into public.announcements (text) values ('اختراق');
+    raise exception 'فشل 18ج: مستخدم عادي أضاف إعلاناً!';
+  exception when others then
+    if sqlerrm like 'فشل 18%' then raise; end if;
+  end;
+  update public.announcements set text = 'اختراق';
+  reset role;
+  select count(*) into v_cnt from public.announcements where text = 'اختراق';
+  if v_cnt <> 0 then raise exception 'فشل 18د: مستخدم عادي عدّل إعلاناً!'; end if;
+
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','33333333-3333-3333-3333-333333333333', true);
+  select count(*) into v_cnt from public.announcements;
+  if v_cnt <> 2 then raise exception 'فشل 18هـ: الأدمن يرى % بدل 2', v_cnt; end if;
+  update public.announcements set active = true where text = 'إعلان مخفي';
+  insert into public.announcements (text, sort_order) values ('إعلان الأدمن', 3);
+  delete from public.announcements where text = 'عرض خاص';
+  reset role;
+  select count(*) into v_cnt from public.announcements where active;
+  if v_cnt <> 2 then raise exception 'فشل 18و: تعديلات الأدمن لم تُطبَّق (%)', v_cnt; end if;
+  raise notice '✅ 18: الإعلانات — النشط للجميع، والإدارة للأدمن فقط';
+
   raise notice '';
   raise notice '════════════════════════════════';
   raise notice '  نجحت جميع اختبارات RLS ✅';
