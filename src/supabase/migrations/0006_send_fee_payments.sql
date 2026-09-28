@@ -92,6 +92,17 @@ create unique index if not exists event_payments_one_active_idx
   on public.event_payments(event_id)
   where status in ('pending','submitted','paid');
 
+-- دالة تحديث updated_at موجودة في schema.sql لكنها قد تغيب عن المشروع الحي
+-- (أُنشئ قبل إضافتها) — تُعرَّف هنا بأمان (create or replace لا يغيّر سلوكها)
+create or replace function public.touch_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+revoke execute on function public.touch_updated_at() from anon, authenticated;
+
 drop trigger if exists event_payments_touch on public.event_payments;
 create trigger event_payments_touch
   before update on public.event_payments
