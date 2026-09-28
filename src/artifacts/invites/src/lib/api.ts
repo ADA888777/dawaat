@@ -70,6 +70,7 @@ export interface EventRecord {
   /** رقم التواصل للاستفسارات — يظهر للمدعو في صفحة الدعوة */
   contactPhone: string | null;
   contactMethod: ContactMethod;
+  createdAt: string;
 }
 
 export interface Guest {
@@ -83,6 +84,7 @@ export interface Guest {
   inviteSentAt: string | null;
   /** الرمز الشخصي المستخدم في رابط الدعوة بدل الاسم والجوال */
   inviteToken: string;
+  createdAt: string;
 }
 
 export interface PublicInvitation {
@@ -151,6 +153,7 @@ function mapEvent(row: EventRow): EventRecord {
     pendingSendCount: row.pending_send_count ?? 0,
     contactPhone: row.contact_phone ?? null,
     contactMethod: row.contact_method ?? "both",
+    createdAt: String((row as unknown as { created_at?: string }).created_at ?? ""),
   };
 }
 
@@ -164,6 +167,7 @@ function mapGuest(row: GuestRow): Guest {
     inviteStatus: row.invite_status ?? "pending",
     inviteSentAt: row.invite_sent_at ?? null,
     inviteToken: row.invite_token,
+    createdAt: String((row as unknown as { created_at?: string }).created_at ?? ""),
   };
 }
 
@@ -1030,6 +1034,53 @@ export interface AppSettings {
   /** شريط الإعلانات المتحرك: الإظهار والسرعة (بكسل/ثانية) */
   tickerEnabled: boolean;
   tickerSpeed: number;
+  /** مفاتيح تفعيل/تعطيل الميزات — تُخزَّن jsonb ويعدّلها الأدمن فقط */
+  featureFlags: FeatureFlags;
+}
+
+export type FeatureKey =
+  | "contacts_import"
+  | "qr_code"
+  | "whatsapp_send"
+  | "subscription_page"
+  | "announcements_bar"
+  | "public_rsvp";
+
+export type FeatureFlags = Record<FeatureKey, boolean>;
+
+export const FEATURE_DEFAULTS: FeatureFlags = {
+  contacts_import: true,
+  qr_code: true,
+  whatsapp_send: true,
+  subscription_page: true,
+  announcements_bar: true,
+  public_rsvp: true,
+};
+
+export const FEATURE_LABELS: Record<FeatureKey, { label: string; hint: string }> = {
+  contacts_import: { label: "استيراد جهات الاتصال", hint: "زر «جهات الاتصال» في صفحة المناسبة (المنتقي وVCF وCSV)." },
+  qr_code: { label: "رمز QR ورابط الدعوة", hint: "زر «رمز QR والرابط» في صفحة المناسبة." },
+  whatsapp_send: { label: "إرسال الدعوات عبر واتساب", hint: "زر «إرسال الدعوات» وقائمة الإرسال." },
+  subscription_page: { label: "صفحة الباقات", hint: "رابط «الباقة» في قائمة المستخدم." },
+  announcements_bar: { label: "شريط الإعلانات", hint: "الشريط المتحرك في الموقع وواجهة المستخدم." },
+  public_rsvp: { label: "رد المدعوين على الدعوة", hint: "أزرار «سأحضر/أعتذر» في صفحة الدعوة العامة." },
+};
+
+export function parseFeatureFlags(raw: unknown): FeatureFlags {
+  const out: FeatureFlags = { ...FEATURE_DEFAULTS };
+  if (raw && typeof raw === "object") {
+    for (const key of Object.keys(FEATURE_DEFAULTS) as FeatureKey[]) {
+      const value = (raw as Record<string, unknown>)[key];
+      if (typeof value === "boolean") out[key] = value;
+    }
+  }
+  return out;
+}
+
+/** هل الميزة مفعّلة؟ تعذّر القراءة = مفعّلة (الافتراضي) */
+export function useFeature(key: FeatureKey): boolean {
+  const { data } = useGetAppSettings();
+  return data?.featureFlags?.[key] ?? FEATURE_DEFAULTS[key];
 }
 
 const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
@@ -1062,6 +1113,7 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   paymentInstructions: "payment_instructions",
   tickerEnabled: "ticker_enabled",
   tickerSpeed: "ticker_speed",
+  featureFlags: "feature_flags",
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -1094,6 +1146,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   paymentInstructions: "",
   tickerEnabled: true,
   tickerSpeed: 60,
+  featureFlags: { ...FEATURE_DEFAULTS },
 };
 
 export const getGetAppSettingsQueryKey = () => ["app-settings"] as const;
@@ -1118,7 +1171,8 @@ export function useGetAppSettings() {
         const value = raw[APP_SETTINGS_COLUMNS[key]];
         if (value === null || value === undefined) continue;
         const fallback = DEFAULT_APP_SETTINGS[key];
-        if (typeof fallback === "boolean") out[key] = Boolean(value);
+        if (key === "featureFlags") out[key] = parseFeatureFlags(value);
+        else if (typeof fallback === "boolean") out[key] = Boolean(value);
         else if (typeof fallback === "number") out[key] = Number(value);
         else out[key] = String(value);
       }
@@ -1136,7 +1190,10 @@ export function useUpdateAppSettings() {
       for (const [key, value] of Object.entries(data)) {
         const column = APP_SETTINGS_COLUMNS[key as keyof AppSettings];
         if (!column || value === undefined) continue;
-        row[column] = typeof value === "string" ? value.slice(0, 20000) : value;
+        row[column] =
+          typeof value === "string" ? value.slice(0, 20000)
+          : key === "featureFlags" ? parseFeatureFlags(value)
+          : value;
       }
       if (Object.keys(row).length === 0) return;
       row.updated_at = new Date().toISOString();
@@ -1457,12 +1514,26 @@ export function paymentErrorMessage(err: unknown): string {
 }
 
 // ---------------- شريط الإعلانات المتحرك ----------------
+export type AnnouncementAudience = "all" | "visitors" | "users" | "free" | "paid";
+
+export const AUDIENCE_LABELS: Record<AnnouncementAudience, string> = {
+  all: "الجميع",
+  visitors: "الزوار غير المسجلين",
+  users: "المستخدمون المسجلون",
+  free: "أصحاب الباقة المجانية",
+  paid: "أصحاب الباقة المدفوعة",
+};
+
 export interface Announcement {
   id: number;
   text: string;
   link: string;
   active: boolean;
+  /** الأولوية: الأصغر يظهر أولاً */
   sortOrder: number;
+  startsAt: string | null;
+  endsAt: string | null;
+  audience: AnnouncementAudience;
   createdAt: string;
 }
 
@@ -1473,8 +1544,20 @@ function mapAnnouncement(r: Record<string, unknown>): Announcement {
     link: String(r.link ?? ""),
     active: Boolean(r.active),
     sortOrder: Number(r.sort_order ?? 0),
+    startsAt: r.starts_at ? String(r.starts_at) : null,
+    endsAt: r.ends_at ? String(r.ends_at) : null,
+    audience: (r.audience as AnnouncementAudience) ?? "all",
     createdAt: String(r.created_at ?? ""),
   };
+}
+
+/** حالة الإعلان الآن كما يراها الأدمن: نشط/مجدول/منتهٍ/معطّل */
+export function announcementState(a: Announcement): "live" | "scheduled" | "expired" | "disabled" {
+  if (!a.active) return "disabled";
+  const now = Date.now();
+  if (a.startsAt && new Date(a.startsAt).getTime() > now) return "scheduled";
+  if (a.endsAt && new Date(a.endsAt).getTime() < now) return "expired";
+  return "live";
 }
 
 export const getListAnnouncementsQueryKey = () => ["announcements"] as const;
@@ -1503,6 +1586,9 @@ export interface AnnouncementPayload {
   link?: string;
   active?: boolean;
   sortOrder?: number;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  audience?: AnnouncementAudience;
 }
 
 function announcementRow(data: Partial<AnnouncementPayload>): Record<string, unknown> {
@@ -1511,6 +1597,9 @@ function announcementRow(data: Partial<AnnouncementPayload>): Record<string, unk
   if (data.link !== undefined) row.link = data.link.trim().slice(0, 500);
   if (data.active !== undefined) row.active = data.active;
   if (data.sortOrder !== undefined) row.sort_order = data.sortOrder;
+  if (data.startsAt !== undefined) row.starts_at = data.startsAt || null;
+  if (data.endsAt !== undefined) row.ends_at = data.endsAt || null;
+  if (data.audience !== undefined) row.audience = data.audience;
   return row;
 }
 
@@ -1563,5 +1652,36 @@ export function useReorderAnnouncements() {
       }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: getListAnnouncementsQueryKey() }),
+  });
+}
+
+// ---------------- الأدمن: كل المدعوين ----------------
+export interface AdminGuest extends Guest {
+  eventTitle: string;
+  eventDate: string | null;
+}
+
+export const getListAdminGuestsQueryKey = () => ["admin", "guests"] as const;
+
+/** كل المدعوين في المنصة مع اسم المناسبة — سياسة RLS تسمح بذلك للأدمن فقط */
+export function useListAdminGuests() {
+  return useQuery({
+    queryKey: getListAdminGuestsQueryKey(),
+    queryFn: async (): Promise<AdminGuest[]> => {
+      const { data, error } = await supabase
+        .from("guests")
+        .select("*, events(title, event_date)")
+        .order("created_at", { ascending: false })
+        .limit(2000);
+      throwIf(error);
+      return ((data ?? []) as Record<string, unknown>[]).map((r) => {
+        const ev = (r.events ?? {}) as Record<string, unknown>;
+        return {
+          ...mapGuest(r as never),
+          eventTitle: String(ev.title ?? "—"),
+          eventDate: ev.event_date ? String(ev.event_date) : null,
+        };
+      });
+    },
   });
 }
