@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, Loader2, Megaphone, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { AnnouncementImageField } from "@/components/announcement-image-field";
+import { ANNOUNCEMENT_ICON_COMPONENTS } from "@/components/announcement-banner";
 import { useToast } from "@/hooks/use-toast";
 import {
   ANNOUNCEMENT_ICONS,
@@ -63,7 +65,6 @@ function fromLocalInput(value: string): string | null {
 interface Draft {
   title: string;
   description: string;
-  imageUrl: string;
   buttonText: string;
   buttonUrl: string;
   startsAt: string;
@@ -74,7 +75,6 @@ interface Draft {
 const draftOfItem = (a: Announcement): Draft => ({
   title: a.title,
   description: a.description,
-  imageUrl: a.imageUrl,
   buttonText: a.buttonText,
   buttonUrl: a.buttonUrl,
   startsAt: toLocalInput(a.startsAt),
@@ -104,8 +104,13 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newIcon, setNewIcon] = useState<AnnouncementIcon>("megaphone");
+  const [newImageUrl, setNewImageUrl] = useState("");
   const [newButtonText, setNewButtonText] = useState("");
   const [newButtonUrl, setNewButtonUrl] = useState("");
+  const [newShowOnHome, setNewShowOnHome] = useState(true);
+  const [newShowOnDashboard, setNewShowOnDashboard] = useState(true);
+  const [newTitleError, setNewTitleError] = useState<string | null>(null);
+  const newTitleRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setEnabled(settings.tickerEnabled);
@@ -128,19 +133,44 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
 
   const add = () => {
     const title = newTitle.trim();
-    if (!title) return;
+    // الزر مفعّل دائماً: الخطأ يُشرح مكانه بدل زر رمادي بلا تفسير
+    if (!title) {
+      setNewTitleError("اكتب عنوان الإعلان أولاً — هو الحقل الوحيد المطلوب.");
+      newTitleRef.current?.focus();
+      return;
+    }
+    const buttonText = newButtonText.trim();
+    const buttonUrl = newButtonUrl.trim();
+    if ((buttonText === "") !== (buttonUrl === "")) {
+      toast({
+        title: "الزر يحتاج نصاً ورابطاً معاً",
+        description: "املأ الحقلين أو اتركهما فارغين ليظهر الإعلان بلا زر.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!newShowOnHome && !newShowOnDashboard) {
+      toast({
+        title: "اختر مكان الظهور",
+        description: "فعّل الصفحة الرئيسية أو لوحة العميل أو الاثنين.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setNewTitleError(null);
     const maxOrder = list.reduce((m, a) => Math.max(m, a.sortOrder), 0);
     createAnnouncement.mutate(
       {
         title,
         description: newDescription.trim(),
         icon: newIcon,
-        buttonText: newButtonText.trim(),
-        buttonUrl: newButtonUrl.trim(),
+        imageUrl: newImageUrl.trim(),
+        buttonText,
+        buttonUrl,
         active: true,
         sortOrder: maxOrder + 1,
-        showOnHome: true,
-        showOnDashboard: true,
+        showOnHome: newShowOnHome,
+        showOnDashboard: newShowOnDashboard,
       },
       {
         onSuccess: () => {
@@ -149,12 +179,18 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
           setNewButtonText("");
           setNewButtonUrl("");
           setNewIcon("megaphone");
+          setNewImageUrl("");
+          setNewShowOnHome(true);
+          setNewShowOnDashboard(true);
           toast({ title: "أُضيف الإعلان وهو ظاهر الآن" });
         },
         onError: fail("تعذّر إضافة الإعلان"),
       },
     );
   };
+
+  const NewIcon = ANNOUNCEMENT_ICON_COMPONENTS[newIcon] ?? Megaphone;
+  const newHasButton = newButtonText.trim() !== "" && newButtonUrl.trim() !== "";
 
   const draftOf = (a: Announcement) => drafts[a.id] ?? draftOfItem(a);
   const setDraft = (a: Announcement, patch: Partial<Draft>) =>
@@ -186,7 +222,6 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
         data: {
           title: d.title,
           description: d.description,
-          imageUrl: d.imageUrl,
           buttonText: d.buttonText,
           buttonUrl: d.buttonUrl,
           startsAt,
@@ -407,17 +442,17 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
                             />
                           </div>
                         </label>
-                        <label className="text-[11px] text-gray-600">
-                          رابط صورة بدل الأيقونة (اختياري)
-                          <Input
-                            value={d.imageUrl}
-                            onChange={(event) => setDraft(a, { imageUrl: event.target.value })}
-                            onBlur={() => saveDraft(a)}
-                            dir="ltr"
-                            className="mt-1 h-9 text-xs"
-                            placeholder="https://…"
-                          />
-                        </label>
+                        <div className="text-[11px] text-gray-600 sm:col-span-2">
+                          صورة الإعلان
+                          <div className="mt-1">
+                            <AnnouncementImageField
+                              value={a.imageUrl}
+                              onChange={(url) => patch(a, { imageUrl: url })}
+                              disabled={busy}
+                              testId={"announcement-image-" + a.id}
+                            />
+                          </div>
+                        </div>
                         <label className="text-[11px] text-gray-600">
                           نص الزر (اختياري)
                           <Input
@@ -505,24 +540,87 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
           </ul>
         )}
 
+        {/* إعلان جديد — نموذج واضح بمعاينة حيّة؛ العنوان هو الحقل الوحيد المطلوب */}
         <form
-          className="space-y-2 rounded-xl border border-line bg-cream-2 p-3"
+          className="space-y-4 rounded-2xl border border-gold/40 bg-cream-2 p-4"
+          data-testid="new-announcement-form"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             add();
           }}
         >
-          <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
-            <FieldRow label="إعلان جديد — العنوان" htmlFor="new-announcement">
-              <Input
-                id="new-announcement"
-                value={newTitle}
-                onChange={(event) => setNewTitle(event.target.value)}
-                maxLength={120}
-                placeholder="عرض خاص على الباقة الماسية"
-              />
-            </FieldRow>
-            <FieldRow label="الأيقونة" htmlFor="new-announcement-icon">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gold/20 text-gold-deep">
+              <Plus className="h-4 w-4" />
+            </span>
+            <div>
+              <h4 className="text-sm font-bold text-gray-900">إضافة إعلان جديد</h4>
+              <p className="text-[11px] text-gray-500">العنوان مطلوب، والباقي اختياري. يظهر فور الإضافة.</p>
+            </div>
+          </div>
+
+          {/* المعاينة: نفس بطاقة الشريط كما ستظهر للعميل */}
+          <div className="relative overflow-hidden rounded-2xl border border-line bg-gradient-to-l from-cream-2 via-white to-cream-2 shadow-sm">
+            <span aria-hidden="true" className="absolute inset-y-0 right-0 w-1 bg-gold" />
+            <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gold/30 bg-gold/10 sm:h-12 sm:w-12">
+                {newImageUrl ? (
+                  <img src={newImageUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <NewIcon className="h-5 w-5 text-gold-deep sm:h-6 sm:w-6" strokeWidth={1.8} />
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className={"text-[15px] font-bold leading-snug sm:text-base " + (newTitle.trim() ? "text-gray-900" : "text-gray-400")}>
+                  {newTitle.trim() || "عنوان الإعلان يظهر هنا"}
+                </p>
+                {newDescription.trim() !== "" && (
+                  <p className="mt-0.5 line-clamp-2 text-[13px] leading-relaxed text-gray-600">{newDescription}</p>
+                )}
+              </div>
+              {newHasButton && (
+                <span className="inline-flex w-full shrink-0 items-center justify-center rounded-full bg-ink px-5 py-2 text-[13px] font-bold text-gold-light sm:w-auto">
+                  {newButtonText.trim()}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <FieldRow label="العنوان *" htmlFor="new-announcement">
+            <Input
+              ref={newTitleRef}
+              id="new-announcement"
+              value={newTitle}
+              onChange={(event) => {
+                setNewTitle(event.target.value);
+                if (newTitleError && event.target.value.trim()) setNewTitleError(null);
+              }}
+              maxLength={120}
+              placeholder="مثال: عرض خاص على الباقة الماسية"
+              aria-invalid={newTitleError ? true : undefined}
+              aria-describedby={newTitleError ? "new-announcement-error" : undefined}
+              className={newTitleError ? "border-red-400 focus-visible:ring-red-400" : ""}
+            />
+            {newTitleError && (
+              <p id="new-announcement-error" role="alert" className="text-xs text-red-600">
+                {newTitleError}
+              </p>
+            )}
+          </FieldRow>
+
+          <FieldRow label="الوصف (اختياري)" htmlFor="new-announcement-desc">
+            <Input
+              id="new-announcement-desc"
+              value={newDescription}
+              onChange={(event) => setNewDescription(event.target.value)}
+              maxLength={300}
+              placeholder="سطر مختصر يظهر تحت العنوان"
+            />
+          </FieldRow>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <FieldRow label="الأيقونة" htmlFor="new-announcement-icon" hint="تُستخدم إذا لم تُرفع صورة.">
               <SelectInput
                 id="new-announcement-icon"
                 value={newIcon}
@@ -530,17 +628,18 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
                 options={ICON_OPTIONS}
               />
             </FieldRow>
+            <div className="space-y-2">
+              <span className="block text-sm font-medium text-gray-800">صورة الإعلان (اختياري)</span>
+              <AnnouncementImageField
+                value={newImageUrl}
+                onChange={setNewImageUrl}
+                disabled={createAnnouncement.isPending}
+                testId="new-announcement-image"
+              />
+            </div>
           </div>
-          <FieldRow label="الوصف (اختياري)" htmlFor="new-announcement-desc">
-            <Input
-              id="new-announcement-desc"
-              value={newDescription}
-              onChange={(event) => setNewDescription(event.target.value)}
-              maxLength={300}
-              placeholder="خصم ٢٠٪ حتى نهاية الشهر"
-            />
-          </FieldRow>
-          <div className="grid gap-2 md:grid-cols-[1fr_2fr_auto] md:items-end">
+
+          <div className="grid gap-3 md:grid-cols-2">
             <FieldRow label="نص الزر (اختياري)" htmlFor="new-announcement-btn">
               <Input
                 id="new-announcement-btn"
@@ -550,7 +649,7 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
                 placeholder="اعرف أكثر"
               />
             </FieldRow>
-            <FieldRow label="رابط الزر" htmlFor="new-announcement-url">
+            <FieldRow label="رابط الزر" htmlFor="new-announcement-url" hint="داخلي مثل /subscription أو خارجي يبدأ بـ https://">
               <Input
                 id="new-announcement-url"
                 value={newButtonUrl}
@@ -560,19 +659,40 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
                 placeholder="/subscription"
               />
             </FieldRow>
-            <Button
-              type="submit"
-              className="bg-gold font-medium text-black hover:bg-gold/90"
-              disabled={createAnnouncement.isPending || newTitle.trim() === ""}
-            >
-              {createAnnouncement.isPending ? (
-                <Loader2 className="ml-1 h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="ml-1 h-4 w-4" />
-              )}
-              إضافة
-            </Button>
           </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs text-gray-700">
+              <Switch
+                checked={newShowOnHome}
+                onCheckedChange={setNewShowOnHome}
+                aria-label="إظهار في الصفحة الرئيسية"
+              />
+              الصفحة الرئيسية للموقع
+            </label>
+            <label className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs text-gray-700">
+              <Switch
+                checked={newShowOnDashboard}
+                onCheckedChange={setNewShowOnDashboard}
+                aria-label="إظهار في لوحة العميل"
+              />
+              لوحة العميل
+            </label>
+          </div>
+
+          <Button
+            type="submit"
+            className="h-11 w-full bg-gold font-bold text-black hover:bg-gold/90 sm:w-auto sm:px-8"
+            disabled={createAnnouncement.isPending}
+            data-testid="new-announcement-submit"
+          >
+            {createAnnouncement.isPending ? (
+              <Loader2 className="ml-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="ml-1 h-4 w-4" />
+            )}
+            إضافة الإعلان
+          </Button>
         </form>
       </div>
 
