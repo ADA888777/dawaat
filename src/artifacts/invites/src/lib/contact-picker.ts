@@ -1,16 +1,22 @@
 /**
  * استيراد جهات الاتصال — طبقة واحدة بعدة طرق حقيقية.
  *
- * الوضع الفعلي لدعم المتصفحات للوصول لجهات الاتصال:
+ * الوضع الفعلي للوصول لجهات الاتصال حسب مكان تشغيل دعوات:
+ *   • تطبيق دعوات (iOS/Android عبر Capacitor، مجلد mobile/) → ملحق أصلي
+ *     «DawaatContactPicker»: على الآيفون منتقي النظام باختيار متعدد، وعلى
+ *     أندرويد قراءة جهات الاتصال (بإذن) لعرضها كقائمة تحديد داخل النافذة.
  *   • أندرويد Chrome/Edge (منذ 80) → Contact Picker API متاح فعلاً
- *   • iPhone: Safari و Chrome و أي متصفح آخر → غير متاح إطلاقاً
- *     (WebKit لم يشغّل الميزة، ولا يوجد "خيار" لتشغيلها)
+ *   • iPhone Safari (ويب) → لا توجد أي Web API للاختيار من جهات الاتصال
+ *     (WebKit لم يشغّل الميزة). الممكن فعلاً: التعبئة التلقائية — حقل اسم
+ *     وحقل جوال بـ autocomplete="name"/"tel" داخل form، فيعرض سفاري جهة
+ *     اتصال مقترحة فوق لوحة المفاتيح وزر «جهة اتصال أخرى…»، جهة واحدة في
+ *     كل مرة. هذا حد النظام نفسه ولا نُدّعي غيره.
  *   • الكمبيوتر (Chrome/Edge/Firefox/Safari) → غير متاح
  *   • داخل iframe أو على اتصال غير آمن (http) → غير متاح حتى على أندرويد
  *
- * لذلك لا تُعتبر هذه الـ API طريقاً وحيداً أبداً. لكل جهاز طريق بديل يعمل:
- *   • iPhone: مشاركة جهة الاتصال (أو عدة جهات) كملف vCard ‎.vcf‎ ثم استيراده.
- *     iOS يصدّر عدة أشخاص في ملف vcf واحد متعدد البطاقات، فيُستورد الجميع.
+ * لذلك لا تُعتبر أي طريقة طريقاً وحيداً. لكل جهاز طريق بديل يعمل:
+ *   • iPhone: مشاركة جهة الاتصال (أو عدة جهات) كملف vCard ‎.vcf‎ ثم استيراده
+ *     — احتياطي لعشرات الأسماء دفعة واحدة. iOS يصدّر عدة أشخاص في ملف واحد.
  *   • أي جهاز: استيراد CSV، أو لصق قائمة أسماء/أرقام، أو الإدخال اليدوي.
  */
 
@@ -30,12 +36,37 @@ export interface PickedContact {
 
 export type ContactPlatform = "android" | "ios" | "desktop" | "unknown";
 
+/**
+ * الطريق الذي تُفتح به جهات الاتصال:
+ *   native   → تطبيق دعوات (Capacitor) عبر الملحق الأصلي
+ *   web-api  → Contact Picker API في متصفح أندرويد
+ *   autofill → سفاري على الآيفون: تعبئة تلقائية من جهات الاتصال (جهة في كل مرة)
+ *   none     → لا طريق مباشر؛ الملفات واللصق والإدخال اليدوي فقط
+ */
+export type ContactAccessVia = "native" | "web-api" | "autofill" | "none";
+
 export interface ContactPickerSupport {
-  /** هل يمكن فتح جهات اتصال الجهاز من هذا المتصفح الآن؟ */
+  /** هل يمكن فتح جهات اتصال الجهاز (اختيار أو قراءة) من هنا الآن؟ */
   supported: boolean;
   /** سبب عدم الدعم، جاهز للعرض للمستخدم */
   reason: string | null;
   platform: ContactPlatform;
+  via: ContactAccessVia;
+  /** هل نعمل داخل تطبيق دعوات لا داخل متصفح؟ */
+  isNativeApp: boolean;
+}
+
+/**
+ * نتيجة فتح جهات الاتصال:
+ *   picked → المستخدم اختار هؤلاء بنفسه (منتقي النظام) فيُحدَّدون تلقائياً
+ *   browse → قائمة جهات الاتصال كاملة للاختيار منها داخل النافذة (أندرويد
+ *            في التطبيق)، فلا يُحدَّد أحد حتى يختاره المستخدم
+ */
+export type ContactPickMode = "picked" | "browse";
+
+export interface ContactPickResult {
+  contacts: PickedContact[];
+  mode: ContactPickMode;
 }
 
 export type ContactImportErrorCode =
@@ -67,8 +98,91 @@ function getContactsManager(): ContactsManagerLike | null {
   return typeof nav.contacts?.select === "function" ? nav.contacts : null;
 }
 
+// ─────────────── جسر تطبيق دعوات (Capacitor — مجلد mobile/) ───────────────
+
+/** ما يعيده الملحق الأصلي DawaatContactPicker على المنصتين */
+interface NativeContact {
+  name?: string;
+  phones?: string[];
+}
+
+interface NativePickResult {
+  contacts?: NativeContact[];
+  /** true عندما يغلق المستخدم المنتقي بلا اختيار */
+  cancelled?: boolean;
+  /** picked = اختارهم المستخدم في منتقي النظام، browse = قائمة كاملة للاختيار هنا */
+  mode?: ContactPickMode;
+}
+
+interface NativeContactPickerPlugin {
+  pickContacts(): Promise<NativePickResult>;
+}
+
+interface CapacitorLike {
+  isNativePlatform?: () => boolean;
+  getPlatform?: () => string;
+  isPluginAvailable?: (name: string) => boolean;
+  registerPlugin?: (name: string) => unknown;
+  Plugins?: Record<string, unknown>;
+}
+
+export const NATIVE_CONTACT_PLUGIN = "DawaatContactPicker";
+
+function getCapacitor(): CapacitorLike | null {
+  if (typeof window === "undefined") return null;
+  const cap = (window as Window & { Capacitor?: CapacitorLike }).Capacitor;
+  return cap && typeof cap === "object" ? cap : null;
+}
+
+/** هل الصفحة تعمل داخل تطبيق دعوات (WebView الخاص بـ Capacitor)؟ */
+export function isNativeApp(): boolean {
+  const cap = getCapacitor();
+  return !!cap && typeof cap.isNativePlatform === "function" && cap.isNativePlatform();
+}
+
+/**
+ * الملحق الأصلي إن كان مسجلاً في التطبيق. Capacitor يحقن جسره في الصفحة
+ * حتى لو حُمِّلت من dawaatly.top مباشرة (server.url)، ويكشف الملحقات
+ * الأصلية عبر registerPlugin بالاسم دون الحاجة لحزمة @capacitor/core هنا.
+ */
+function getNativeContactPicker(): NativeContactPickerPlugin | null {
+  const cap = getCapacitor();
+  if (!cap || !isNativeApp()) return null;
+  if (
+    typeof cap.isPluginAvailable === "function" &&
+    !cap.isPluginAvailable(NATIVE_CONTACT_PLUGIN)
+  ) {
+    return null;
+  }
+
+  const fromRegistry = cap.Plugins?.[NATIVE_CONTACT_PLUGIN] as
+    | NativeContactPickerPlugin
+    | undefined;
+  if (fromRegistry && typeof fromRegistry.pickContacts === "function") {
+    return fromRegistry;
+  }
+
+  if (typeof cap.registerPlugin === "function") {
+    try {
+      const plugin = cap.registerPlugin(NATIVE_CONTACT_PLUGIN) as
+        | NativeContactPickerPlugin
+        | undefined;
+      if (plugin && typeof plugin.pickContacts === "function") return plugin;
+    } catch {
+      // الملحق غير مسجّل في هذا البناء من التطبيق
+    }
+  }
+  return null;
+}
+
 export function detectPlatform(): ContactPlatform {
   if (typeof navigator === "undefined") return "unknown";
+  // داخل التطبيق يخبرنا Capacitor بالمنصة مباشرة بلا تخمين من user agent
+  const cap = getCapacitor();
+  if (cap && typeof cap.getPlatform === "function") {
+    const native = cap.getPlatform();
+    if (native === "ios" || native === "android") return native;
+  }
   const ua = navigator.userAgent || "";
   // iPadOS 13+ يتنكر كـ Macintosh، فيُكشف بوجود لمس متعدد
   const isIpadOS =
@@ -85,9 +199,18 @@ export function detectPlatform(): ContactPlatform {
  */
 export function getContactPickerSupport(): ContactPickerSupport {
   const platform = detectPlatform();
+  const nativeApp = isNativeApp();
 
   if (typeof window === "undefined") {
-    return { supported: false, reason: null, platform };
+    return { supported: false, reason: null, platform, via: "none", isNativeApp: false };
+  }
+
+  // ① تطبيق دعوات: الملحق الأصلي أولاً — لا يعتمد على قدرات WebView
+  if (nativeApp) {
+    if (getNativeContactPicker()) {
+      return { supported: true, reason: null, platform, via: "native", isNativeApp: true };
+    }
+    // نسخة قديمة من التطبيق بلا الملحق: نكمل بفحص قدرات الـ WebView كالمتصفح
   }
 
   const isSecure = window.isSecureContext ?? location.protocol === "https:";
@@ -95,6 +218,8 @@ export function getContactPickerSupport(): ContactPickerSupport {
     return {
       supported: false,
       platform,
+      via: "none",
+      isNativeApp: nativeApp,
       reason:
         "الوصول لجهات الاتصال يحتاج اتصالاً آمناً (https). استخدم أحد البدائل بالأسفل.",
     };
@@ -110,22 +235,36 @@ export function getContactPickerSupport(): ContactPickerSupport {
     return {
       supported: false,
       platform,
+      via: "none",
+      isNativeApp: nativeApp,
       reason:
         "لا يمكن فتح جهات الاتصال داخل نافذة مدمجة. افتح الموقع في المتصفح مباشرة، أو استخدم أحد البدائل بالأسفل.",
     };
   }
 
-  if (!getContactsManager()) {
-    const reason =
-      platform === "ios"
-        ? "متصفح iPhone/iPad لا يسمح لأي موقع بقراءة جهات الاتصال. الطريقة العملية على الآيفون: شارِك جهات الاتصال كملف ‎.vcf‎ واستوردها من تبويب «ملف»."
-        : platform === "desktop"
-          ? "متصفحات الكمبيوتر لا تدعم الوصول لجهات الاتصال. استورد ملف CSV أو ‎.vcf‎، أو الصق القائمة، أو أضف الرقم يدوياً."
-          : "متصفحك لا يدعم فتح جهات الاتصال. استخدم أحد البدائل بالأسفل.";
-    return { supported: false, platform, reason };
+  // ② أندرويد Chrome/Edge: Contact Picker API
+  if (getContactsManager()) {
+    return { supported: true, reason: null, platform, via: "web-api", isNativeApp: nativeApp };
   }
 
-  return { supported: true, reason: null, platform };
+  // ③ سفاري على الآيفون: التعبئة التلقائية من جهات الاتصال (جهة في كل مرة).
+  //    ليست «فتح جهات الاتصال» بالمعنى الكامل، لذلك supported=false مع via=autofill
+  //    حتى تعرض الواجهة لوحة التعبئة مباشرة بلا رسالة «غير مدعوم».
+  if (platform === "ios") {
+    return {
+      supported: false,
+      platform,
+      via: "autofill",
+      isNativeApp: nativeApp,
+      reason: null,
+    };
+  }
+
+  const reason =
+    platform === "desktop"
+      ? "متصفحات الكمبيوتر لا تدعم الوصول لجهات الاتصال. استورد ملف CSV أو ‎.vcf‎، أو الصق القائمة، أو أضف الرقم يدوياً."
+      : "متصفحك لا يدعم فتح جهات الاتصال. استخدم أحد البدائل بالأسفل.";
+  return { supported: false, platform, via: "none", isNativeApp: nativeApp, reason };
 }
 
 /** يبقى للتوافق مع الاستدعاءات القديمة */
@@ -236,14 +375,58 @@ export function splitKnownContacts(
   return { fresh, known: dup };
 }
 
-// ──────────────────── جهات اتصال الجهاز (أندرويد) ────────────────────
+// ──────────── جهات اتصال الجهاز (التطبيق أو أندرويد Chrome) ────────────
+
+function mapNativeContacts(list: NativeContact[] | undefined): PickedContact[] {
+  const mapped: PickedContact[] = [];
+  for (const entry of list ?? []) {
+    const numbers = (entry?.phones ?? [])
+      .map((t) => normalizeContactPhone(String(t ?? "")))
+      .filter((t) => t !== "");
+    const phone = preferMobileNumber(numbers);
+    if (!phone) continue;
+    const name = String(entry?.name ?? "").trim();
+    mapped.push({ name: name || phone, phone });
+  }
+  return dedupeContacts(mapped);
+}
+
+/** يفتح جهات الاتصال عبر الملحق الأصلي داخل تطبيق دعوات */
+async function pickContactsNative(
+  plugin: NativeContactPickerPlugin,
+): Promise<ContactPickResult> {
+  let result: NativePickResult;
+  try {
+    result = await plugin.pickContacts();
+  } catch (err) {
+    const message = String((err as Error)?.message ?? err ?? "").toLowerCase();
+    if (/cancel/.test(message)) return { contacts: [], mode: "picked" };
+    if (/denied|permission|not allowed|restricted/.test(message)) {
+      throw new ContactImportError(
+        "denied",
+        "لم يُسمح للتطبيق بالوصول لجهات الاتصال. فعّل الإذن من إعدادات الجهاز ← دعوات ← جهات الاتصال، أو استخدم أحد البدائل بالأسفل.",
+      );
+    }
+    throw new ContactImportError(
+      "failed",
+      "تعذر فتح جهات الاتصال في التطبيق. استخدم أحد البدائل بالأسفل.",
+    );
+  }
+
+  if (!result || result.cancelled) return { contacts: [], mode: "picked" };
+  return {
+    contacts: mapNativeContacts(result.contacts),
+    mode: result.mode === "browse" ? "browse" : "picked",
+  };
+}
 
 /**
- * يفتح منتقي جهات الاتصال (اختيار متعدد) ويرجع أزواج اسم/رقم موحّدة.
- * يرجع مصفوفة فارغة إذا ألغى المستخدم — وهذا ليس خطأً.
+ * يفتح جهات اتصال الجهاز بأفضل طريق متاح ويرجع أزواج اسم/رقم موحّدة
+ * مع نمط النتيجة (picked: اختارهم المستخدم، browse: قائمة للاختيار منها).
+ * يرجع قائمة فارغة إذا ألغى المستخدم — وهذا ليس خطأً.
  * يرمي ContactImportError مع code يشرح السبب في الحالات الأخرى.
  */
-export async function pickContacts(): Promise<PickedContact[]> {
+export async function openDeviceContacts(): Promise<ContactPickResult> {
   const support = getContactPickerSupport();
   if (!support.supported) {
     throw new ContactImportError(
@@ -252,6 +435,21 @@ export async function pickContacts(): Promise<PickedContact[]> {
     );
   }
 
+  if (support.via === "native") {
+    const plugin = getNativeContactPicker();
+    if (plugin) return pickContactsNative(plugin);
+  }
+
+  return { contacts: await pickContactsWebApi(), mode: "picked" };
+}
+
+/** يبقى للاستدعاءات القديمة: جهات الاتصال فقط بلا نمط النتيجة */
+export async function pickContacts(): Promise<PickedContact[]> {
+  return (await openDeviceContacts()).contacts;
+}
+
+/** Contact Picker API — أندرويد Chrome/Edge */
+async function pickContactsWebApi(): Promise<PickedContact[]> {
   const manager = getContactsManager();
   if (!manager) {
     throw new ContactImportError(

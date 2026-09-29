@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>دعوات</title>
+    <!--
+      صفحة احتياطية فقط. التطبيق يحمّل الموقع الحي https://dawaatly.top مباشرة
+      (server.url في capacitor.config.json)، فلا تظهر هذه الصفحة إلا إذا تعذّر
+      الوصول للموقع — نفس الحسابات ونفس البيانات (Supabase) في التطبيق والموقع.
+    -->
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex; align-items: center; justify-content: center; text-align: center;
+        font-family: -apple-system, "Segoe UI", Tahoma, sans-serif;
+        background: #0f0e0c; color: #f1e6c8;
+        padding: 24px calc(16px + env(safe-area-inset-right)) 24px calc(16px + env(safe-area-inset-left));
+      }
+      h1 { font-size: 28px; margin: 0 0 12px; letter-spacing: 1px; }
+      p { color: #cbbf9d; line-height: 1.8; margin: 0 0 20px; }
+      a {
+        display: inline-block; padding: 12px 28px; border-radius: 999px;
+        background: #c9a24a; color: #1a1a1a; font-weight: 700; text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>دعوات</h1>
+      <p>تعذّر الوصول إلى الموقع الآن. تأكد من اتصالك بالإنترنت ثم أعد فتح التطبيق.</p>
+      <a href="https://dawaatly.top">إعادة المحاولة</a>
+    </main>
+  </body>
+</html>

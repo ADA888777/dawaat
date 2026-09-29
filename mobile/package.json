@@ -1,0 +1,24 @@
+{
+  "name": "dawaat-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "غلاف Capacitor لتطبيق دعوات على iOS وأندرويد — يحمّل الموقع dawaatly.top نفسه ويضيف منتقي جهات الاتصال الأصلي",
+  "scripts": {
+    "add:android": "cap add android",
+    "add:ios": "cap add ios",
+    "sync": "cap sync",
+    "open:android": "cap open android",
+    "open:ios": "cap open ios",
+    "run:android": "cap run android",
+    "run:ios": "cap run ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
+    "dawaat-contact-picker": "file:./contact-picker"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2"
+  }
+}

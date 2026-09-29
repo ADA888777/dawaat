@@ -12,6 +12,7 @@ dawaat/
 ├── src/                       ← شيفرة المشروع الكاملة (pnpm workspace)
 │   ├── artifacts/invites/     ← تطبيق دعوات (React + Vite + Supabase)
 │   └── supabase/              ← المخطط والهجرات واختبارات RLS
+├── mobile/                    ← تطبيق iOS/Android (Capacitor) + ملحق جهات الاتصال الأصلي
 ├── .github/workflows/ci.yml   ← فحص الأنواع والبناء واختبارات أمان قاعدة البيانات
 ├── wrangler.jsonc             ← إعداد النشر على Cloudflare Workers
 └── README.md
@@ -104,6 +105,28 @@ src/supabase/migrations/0009_announcement_cards.sql
 `is_admin()`، والعمليات الحسّاسة (الباقات، حد المناسبات، مراجعة المدفوعات) دوال
 `security definer` ترفض غير الأدمن بـ `ADMIN_ONLY`، وتريجر `protect_profile_columns`
 يمنع أي مستخدم من تعديل دوره أو باقته. اختبارات RLS 17–20 تثبت ذلك في CI.
+
+---
+
+## تطبيق iOS / Android وجهات الاتصال — `mobile/`
+
+الموقع هو المنتج، والتطبيق غلاف Capacitor يحمّل `https://dawaatly.top` نفسه
+(نفس الحسابات والبيانات) ويضيف **منتقي جهات الاتصال الأصلي** لإضافة المدعوين
+من جوال المستخدم. البناء والتفاصيل في [`mobile/README.md`](mobile/README.md).
+
+ما يعمل فعلاً في كل منصة عند الضغط على «جهات الاتصال» في صفحة المناسبة:
+
+| المنصة | الطريقة | اختيار متعدد |
+|---|---|---|
+| تطبيق iPhone | منتقي النظام (`CNContactPickerViewController`) — بلا إذن | نعم |
+| تطبيق Android | قراءة جهات الاتصال بإذن ← قائمة تحديد وبحث داخل النافذة (وبلا إذن: منتقي النظام لجهة واحدة) | نعم |
+| Android Chrome/Edge (ويب) | Contact Picker API | نعم |
+| iPhone Safari (ويب) | **تعبئة تلقائية** من جهات الاتصال: حقل اسم وحقل جوال (`autocomplete="name"/"tel"`) يعبّئهما سفاري فوق لوحة المفاتيح ← «إضافة للقائمة» وتكرار | لا — جهة في كل مرة (حد النظام؛ لا توجد Web API لذلك). ملف VCF احتياطي لعشرات الأسماء دفعة واحدة |
+| الكمبيوتر | VCF / CSV / لصق قائمة / إدخال يدوي | — |
+
+الاكتشاف والتفرّع في `src/artifacts/invites/src/lib/contact-picker.ts`
+(`getContactPickerSupport().via`: `native` / `web-api` / `autofill` / `none`)،
+والواجهة في `components/contact-import-dialog.tsx`.
 
 ---
 

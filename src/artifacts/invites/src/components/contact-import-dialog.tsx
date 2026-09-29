@@ -4,6 +4,7 @@ import {
   CheckCheck,
   ClipboardPaste,
   Contact,
+  ContactRound,
   Download,
   FileSpreadsheet,
   Info,
@@ -33,9 +34,10 @@ import {
   isValidContactPhone,
   mergeContacts,
   normalizeContactPhone,
+  openDeviceContacts,
   parseContactFiles,
   parseContactLines,
-  pickContacts,
+  type ContactPickMode,
   type PickedContact,
 } from "@/lib/contact-picker";
 import {
@@ -55,6 +57,12 @@ interface ContactImportDialogProps {
   existingPhones?: string[];
   /** جهات اتصال جاءت من منتقي الجهاز قبل فتح النافذة */
   initialContacts?: PickedContact[];
+  /**
+   * picked (افتراضي): اختارهم المستخدم بنفسه فيُحدَّدون تلقائياً.
+   * browse: قائمة جهات الاتصال كاملة (أندرويد في التطبيق) فلا يُحدَّد أحد
+   * حتى يختاره المستخدم من القائمة.
+   */
+  initialMode?: ContactPickMode;
   /** نتيجة محاولة فتح جهات الاتصال قبل فتح النافذة */
   initialMessage?: string | null;
   /** يُسلّم المحددين فقط للأب ليحفظهم */
@@ -68,7 +76,8 @@ interface StagedRow extends PickedContact {
   alreadyInvited: boolean;
 }
 
-type Method = "device" | "vcf" | "csv" | "manual" | "paste";
+/** autofill = سفاري على الآيفون: تعبئة تلقائية من جهات الاتصال، جهة في كل مرة */
+type Method = "device" | "autofill" | "vcf" | "csv" | "manual" | "paste";
 
 const VCF_ACCEPT = ".vcf,.vcard,text/vcard,text/x-vcard,text/directory";
 const CSV_ACCEPT = ".csv,.txt,text/csv,text/plain,application/vnd.ms-excel";
@@ -88,10 +97,12 @@ function downloadCsvTemplate() {
 /**
  * نافذة «جهات الاتصال»: اختيار/استيراد ← مراجعة وتحديد ← إضافة للمدعوين.
  *
- * - المتصفح الذي يدعم Contact Picker (أندرويد Chrome/Edge غالباً) يفتح
- *   جهات الاتصال مباشرة، مع إبقاء البدائل ظاهرة تحته.
- * - غير الداعم (iPhone Safari وكل متصفحات الكمبيوتر) لا يرى رسالة خطأ،
- *   بل يرى مباشرة: استيراد ملف VCF، استيراد CSV، إضافة يدوية.
+ * - تطبيق دعوات (Capacitor) أو متصفح يدعم Contact Picker (أندرويد Chrome/Edge)
+ *   يفتح جهات الاتصال مباشرة، مع إبقاء البدائل ظاهرة تحته.
+ * - سفاري على الآيفون (ويب) يرى مباشرة لوحة «من جهات الاتصال»: حقل اسم وحقل
+ *   جوال يعبّئهما سفاري من جهات الاتصال (جهة في كل مرة — حد النظام نفسه)،
+ *   وملف VCF يبقى احتياطياً لعشرات الأسماء دفعة واحدة. لا رسالة «غير مدعوم».
+ * - متصفحات الكمبيوتر لا ترى رسالة خطأ، بل مباشرة: VCF، CSV، إضافة يدوية.
  * - كل الطرق تنتهي بنفس قائمة المراجعة: أرقام موحّدة (+9665…) بلا تكرار،
  *   وتحديد الكل أو أشخاص معينين قبل الحفظ.
  */
@@ -102,11 +113,16 @@ export function ContactImportDialog({
   isSaving,
   existingPhones,
   initialContacts,
+  initialMode,
   initialMessage,
   onImport,
 }: ContactImportDialogProps) {
   const support = useMemo(() => getContactPickerSupport(), []);
   const isIos = support.platform === "ios";
+  /** سفاري على الآيفون: التعبئة التلقائية هي الطريق المباشر الوحيد */
+  const useAutofill = support.via === "autofill";
+  /** الطريقة المباشرة الأولى لهذا الجهاز عند فشل غيرها */
+  const primaryMethod: Method = useAutofill ? "autofill" : "vcf";
   const fileAccept = (fallback: string) =>
     contactFileAccept(support.platform) === undefined ? undefined : fallback;
 
@@ -121,7 +137,10 @@ export function ContactImportDialog({
   const [pasteText, setPasteText] = useState("");
   const [manualName, setManualName] = useState("");
   const [manualPhone, setManualPhone] = useState("");
+  const [autofillName, setAutofillName] = useState("");
+  const [autofillPhone, setAutofillPhone] = useState("");
 
+  const autofillNameRef = useRef<HTMLInputElement>(null);
   const vcfInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const reviewRef = useRef<HTMLDivElement>(null);
@@ -139,6 +158,7 @@ export function ContactImportDialog({
   const buildRows = (
     contacts: PickedContact[],
     previous: Map<string, StagedRow>,
+    mode: ContactPickMode = "picked",
   ): StagedRow[] =>
     contacts.map((contact) => {
       const key = contactPhoneKey(contact.phone);
@@ -148,41 +168,63 @@ export function ContactImportDialog({
         ...contact,
         key,
         alreadyInvited,
-        // المدعو مسبقاً يُعرض لكن لا يُحدَّد تلقائياً حتى لا يُضاف مرتين
-        selected: before ? before.selected : !alreadyInvited,
+        // المدعو مسبقاً يُعرض لكن لا يُحدَّد تلقائياً حتى لا يُضاف مرتين،
+        // وفي نمط التصفح (قائمة الجهاز كاملة) لا يُحدَّد أحد حتى يختاره المستخدم
+        selected: before
+          ? before.selected
+          : mode === "browse"
+            ? false
+            : !alreadyInvited,
       };
     });
+
+  /** رسالة ما بعد قراءة جهات الاتصال من الجهاز حسب نمط النتيجة */
+  const deviceNotice = (rows: StagedRow[], mode: ContactPickMode) => {
+    const dup = rows.filter((row) => row.alreadyInvited).length;
+    if (mode === "browse") {
+      return (
+        "قرأنا " +
+        rows.length +
+        " جهة اتصال من جهازك — حدّد من تريد دعوته" +
+        (dup > 0 ? " (" + dup + " منهم مدعوون مسبقاً)" : "")
+      );
+    }
+    return (
+      "قرأنا " +
+      rows.length +
+      " جهة اتصال من جهازك" +
+      (dup > 0 ? " — " + dup + " منهم مدعوون مسبقاً وتُركوا بلا تحديد" : "")
+    );
+  };
 
   // كل فتح للنافذة يبدأ من حالة نظيفة، مع بذرة منتقي الجهاز إن وُجدت
   useEffect(() => {
     if (!open) return;
     const seed = mergeContacts([], initialContacts ?? []);
-    const rows = buildRows(seed, new Map());
+    const mode: ContactPickMode = initialMode ?? "picked";
+    const rows = buildRows(seed, new Map(), mode);
     setStaged(rows);
     setError(null);
     setPasteText("");
     setManualName("");
     setManualPhone("");
+    setAutofillName("");
+    setAutofillPhone("");
     setFilter("");
     setDragging(false);
 
     if (rows.length > 0) {
-      const dup = rows.filter((row) => row.alreadyInvited).length;
-      setNotice(
-        "قرأنا " +
-          rows.length +
-          " جهة اتصال من جهازك" +
-          (dup > 0 ? " — " + dup + " منهم مدعوون مسبقاً وتُركوا بلا تحديد" : ""),
-      );
+      setNotice(deviceNotice(rows, mode));
       setMethod("device");
       return;
     }
 
     setNotice(initialMessage ?? null);
-    // على الآيفون نعرض خطوات ملف VCF مباشرة لأنها الطريقة العملية الوحيدة
-    setMethod(support.supported ? null : isIos ? "vcf" : null);
+    // سفاري على الآيفون: لوحة «من جهات الاتصال» (التعبئة التلقائية) مباشرة.
+    // الأجهزة التي تفتح جهات الاتصال فعلاً تبدأ بزر الفتح بلا طريقة محددة.
+    setMethod(support.supported ? null : useAutofill ? "autofill" : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialContacts, initialMessage]);
+  }, [open, initialContacts, initialMode, initialMessage]);
 
   const scrollToReview = () =>
     window.setTimeout(
@@ -190,7 +232,11 @@ export function ContactImportDialog({
       50,
     );
 
-  const addContacts = (list: PickedContact[], sourceLabel: string) => {
+  const addContacts = (
+    list: PickedContact[],
+    sourceLabel: string,
+    mode: ContactPickMode = "picked",
+  ) => {
     if (list.length === 0) {
       setError("لم نجد أي رقم جوال صالح في " + sourceLabel + ".");
       return;
@@ -201,7 +247,7 @@ export function ContactImportDialog({
       staged.map((row) => ({ name: row.name, phone: row.phone })),
       list,
     );
-    const rows = buildRows(merged, previous);
+    const rows = buildRows(merged, previous, mode);
     const added = rows.length - staged.length;
     const duplicatesInSource = list.length - added;
     const invitedBefore = rows.filter((row) => row.alreadyInvited).length;
@@ -214,7 +260,9 @@ export function ContactImportDialog({
     const messages: string[] = [
       added === 0
         ? "كل الأرقام في " + label + " موجودة في القائمة مسبقاً"
-        : "قرأنا " + added + " جهة اتصال من " + label,
+        : mode === "browse"
+          ? "قرأنا " + added + " جهة اتصال من " + label + " — حدّد من تريد دعوته"
+          : "قرأنا " + added + " جهة اتصال من " + label,
     ];
     if (added > 0 && duplicatesInSource > 0) {
       messages.push("حذفنا المكرر: " + duplicatesInSource);
@@ -232,22 +280,40 @@ export function ContactImportDialog({
     setError(null);
     setNotice(null);
     try {
-      const picked = await pickContacts();
-      if (picked.length === 0) {
+      const result = await openDeviceContacts();
+      if (result.contacts.length === 0) {
         setNotice("لم تختر أي جهة اتصال — أعد المحاولة أو استخدم طريقة أخرى");
         return;
       }
-      addContacts(picked, "جهات اتصال الجهاز");
+      addContacts(result.contacts, "جهات اتصال الجهاز", result.mode);
     } catch (err) {
       setError(
         err instanceof ContactImportError
           ? err.message
           : "تعذر فتح جهات الاتصال. استخدم استيراد ملف VCF أو CSV.",
       );
-      setMethod("vcf");
+      setMethod(primaryMethod);
     } finally {
       setBusy(false);
     }
+  };
+
+  /**
+   * سفاري على الآيفون: الحقلان يعبّئهما النظام من جهات الاتصال (جهة واحدة
+   * في كل مرة)، ثم تُضاف للقائمة ويعود التركيز لحقل الاسم للجهة التالية.
+   */
+  const handleAutofillAdd = () => {
+    const phone = normalizeContactPhone(autofillPhone);
+    if (!isValidContactPhone(phone)) {
+      setError(
+        "رقم الجوال غير صالح. اضغط حقل الرقم واختر جهة الاتصال من الاقتراح فوق لوحة المفاتيح، أو اكتبه مثل 0501234567",
+      );
+      return;
+    }
+    addContacts([{ name: autofillName.trim() || phone, phone }], "جهات الاتصال");
+    setAutofillName("");
+    setAutofillPhone("");
+    window.setTimeout(() => autofillNameRef.current?.focus(), 0);
   };
 
   const handleFiles = async (fileList: FileList | null) => {
@@ -366,7 +432,7 @@ export function ContactImportDialog({
     title: string,
     hint: string,
     onClick: () => void,
-    recommended = false,
+    badge: string | null = null,
   ) => (
     <button
       type="button"
@@ -381,9 +447,9 @@ export function ContactImportDialog({
           : "border-line bg-white hover:border-gold/60")
       }
     >
-      {recommended && (
+      {badge && (
         <span className="absolute -top-2 rounded-full bg-gold px-2 text-[10px] font-bold text-black">
-          الأنسب لجهازك
+          {badge}
         </span>
       )}
       <span className="text-gold-deep">{icon}</span>
@@ -435,6 +501,7 @@ export function ContactImportDialog({
                 onClick={() => void handleDevicePicker()}
                 disabled={busy}
                 className="h-auto w-full flex-col gap-0.5 bg-ink py-3 text-gold-light hover:bg-ink-soft"
+                data-testid="device-picker-button"
               >
                 <span className="flex items-center gap-2 text-base font-bold">
                   {busy && method === "device" ? (
@@ -445,9 +512,42 @@ export function ContactImportDialog({
                   فتح جهات الاتصال
                 </span>
                 <span className="text-xs font-normal opacity-80">
-                  اختر شخصاً أو عدة أشخاص من جهازك
+                  {support.via === "native" && support.platform === "android"
+                    ? "تُعرض جهات اتصال جهازك هنا لتحديد من تريد"
+                    : "اختر شخصاً أو عدة أشخاص من جهازك"}
                 </span>
               </Button>
+              <p className="text-center text-xs text-gray-500">
+                أو استورد بطريقة أخرى
+              </p>
+            </>
+          ) : useAutofill ? (
+            <>
+              {/* سفاري على الآيفون: لوحة التعبئة من جهات الاتصال هي الواجهة المباشرة */}
+              <button
+                type="button"
+                onClick={() => {
+                  setMethod("autofill");
+                  setError(null);
+                  window.setTimeout(() => autofillNameRef.current?.focus(), 0);
+                }}
+                aria-pressed={method === "autofill"}
+                data-testid="autofill-button"
+                className={
+                  "flex w-full flex-col items-center gap-0.5 rounded-xl border-2 px-3 py-3 text-center transition-colors " +
+                  (method === "autofill"
+                    ? "border-gold bg-gold/10"
+                    : "border-line bg-white hover:border-gold/60")
+                }
+              >
+                <span className="flex items-center gap-2 text-base font-bold text-gray-900">
+                  <ContactRound className="h-5 w-5 text-gold-deep" />
+                  من جهات الاتصال
+                </span>
+                <span className="text-xs text-gray-600">
+                  سفاري يعبّئ الاسم والرقم من جهات اتصالك — جهة في كل مرة
+                </span>
+              </button>
               <p className="text-center text-xs text-gray-500">
                 أو استورد بطريقة أخرى
               </p>
@@ -456,9 +556,8 @@ export function ContactImportDialog({
             <div className="flex items-start gap-2 rounded-lg border border-line bg-cream-2 px-3 py-2">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-gold-deep" />
               <p className="text-xs leading-relaxed text-gray-700">
-                {isIos
-                  ? "على الآيفون لا يسمح المتصفح بفتح جهات الاتصال من المواقع، لذلك استورد ملف VCF من تطبيق جهات الاتصال — يأخذ دقيقة واحدة."
-                  : "هذا المتصفح لا يتيح فتح جهات الاتصال مباشرة. اختر إحدى الطرق التالية — كلها تعمل على جهازك."}
+                {support.reason ??
+                  "هذا المتصفح لا يتيح فتح جهات الاتصال مباشرة. اختر إحدى الطرق التالية — كلها تعمل على جهازك."}
               </p>
             </div>
           )}
@@ -468,9 +567,15 @@ export function ContactImportDialog({
               "vcf",
               <Contact className="h-6 w-6" />,
               "استيراد ملف VCF",
-              "ملف جهات الاتصال من الجوال",
+              useAutofill
+                ? "لعشرات الأسماء دفعة واحدة"
+                : "ملف جهات الاتصال من الجوال",
               () => chooseFileMethod("vcf"),
-              !support.supported && support.platform !== "desktop",
+              useAutofill
+                ? "احتياطي: لعشرات الأسماء دفعة واحدة"
+                : !support.supported && support.platform !== "desktop"
+                  ? "الأنسب لجهازك"
+                  : null,
             )}
             {optionCard(
               "csv",
@@ -503,6 +608,76 @@ export function ContactImportDialog({
           </button>
 
           {/* تفاصيل الطريقة المختارة */}
+          {method === "autofill" && (
+            <form
+              className="space-y-3 rounded-lg border border-line bg-cream-2 p-4"
+              data-testid="autofill-form"
+              autoComplete="on"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleAutofillAdd();
+              }}
+            >
+              <ol className="list-decimal space-y-1 pr-4 text-xs leading-relaxed text-gray-700">
+                <li>اضغط حقل «الاسم» بالأسفل.</li>
+                <li>
+                  فوق لوحة المفاتيح يعرض سفاري جهة اتصال مقترحة، أو اضغط
+                  «تعبئة تلقائية» ← «جهة اتصال أخرى…» واختر الشخص.
+                </li>
+                <li>يُعبَّأ الاسم والرقم ← اضغط «إضافة للقائمة» وكرّر للتالي.</li>
+              </ol>
+              <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                <div>
+                  <Label htmlFor="autofill-name" className="mb-1 block text-xs">
+                    الاسم
+                  </Label>
+                  {/* شروط سفاري للتعبئة من جهات الاتصال: حقل داخل form مع name و autocomplete */}
+                  <Input
+                    ref={autofillNameRef}
+                    id="autofill-name"
+                    name="name"
+                    type="text"
+                    autoComplete="name"
+                    autoCapitalize="words"
+                    enterKeyHint="next"
+                    value={autofillName}
+                    onChange={(event) => setAutofillName(event.target.value)}
+                    placeholder="اضغط هنا واختر من جهات الاتصال"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="autofill-tel" className="mb-1 block text-xs">
+                    رقم الجوال
+                  </Label>
+                  <Input
+                    id="autofill-tel"
+                    name="tel"
+                    type="tel"
+                    autoComplete="tel"
+                    inputMode="tel"
+                    enterKeyHint="done"
+                    dir="ltr"
+                    className="text-right"
+                    value={autofillPhone}
+                    onChange={(event) => setAutofillPhone(event.target.value)}
+                    placeholder="05XXXXXXXX"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="bg-ink text-gold-light hover:bg-ink-soft"
+                  disabled={busy || autofillPhone.trim() === ""}
+                >
+                  <Plus className="ml-1 h-4 w-4" /> إضافة للقائمة
+                </Button>
+              </div>
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                لا يتيح سفاري اختيار عدة جهات دفعة واحدة من المواقع — لعشرات الأسماء
+                استخدم «استيراد ملف VCF».
+              </p>
+            </form>
+          )}
+
           {method === "vcf" && (
             <div
               onDragOver={(event) => {
@@ -616,6 +791,8 @@ export function ContactImportDialog({
               <div>
                 <Label className="mb-1 block text-xs">الاسم</Label>
                 <Input
+                  name="guest-name"
+                  autoComplete="name"
                   value={manualName}
                   onChange={(event) => setManualName(event.target.value)}
                   placeholder="سعود العتيبي"
@@ -624,6 +801,9 @@ export function ContactImportDialog({
               <div>
                 <Label className="mb-1 block text-xs">رقم الجوال</Label>
                 <Input
+                  name="guest-tel"
+                  type="tel"
+                  autoComplete="tel"
                   value={manualPhone}
                   onChange={(event) => setManualPhone(event.target.value)}
                   dir="ltr"

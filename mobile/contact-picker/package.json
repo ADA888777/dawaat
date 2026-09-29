@@ -1,0 +1,40 @@
+{
+  "name": "dawaat-contact-picker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ملحق Capacitor لتطبيق دعوات: اختيار المدعوين من جهات اتصال الجهاز (منتقي النظام على iOS باختيار متعدد، وقراءة جهات الاتصال بإذن على أندرويد)",
+  "license": "MIT",
+  "author": "دعوات",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ADA888777/dawaat.git"
+  },
+  "main": "index.js",
+  "module": "index.js",
+  "type": "module",
+  "files": [
+    "android/src/main/",
+    "android/build.gradle",
+    "ios/Sources",
+    "index.js",
+    "Package.swift",
+    "DawaatContactPicker.podspec"
+  ],
+  "keywords": [
+    "capacitor",
+    "plugin",
+    "native",
+    "contacts"
+  ],
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  }
+}
