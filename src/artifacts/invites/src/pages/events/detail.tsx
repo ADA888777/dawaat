@@ -76,7 +76,8 @@ import {
 import {
   ContactImportError,
   getContactPickerSupport,
-  pickContacts,
+  openDeviceContacts,
+  type ContactPickMode,
   type PickedContact,
 } from "@/lib/contact-picker";
 
@@ -112,6 +113,8 @@ export default function EventDetail() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   /** ما يعيده منتقي جهات الاتصال قبل فتح نافذة المراجعة */
   const [importSeed, setImportSeed] = useState<PickedContact[]>([]);
+  /** picked: اختارهم المستخدم في منتقي النظام — browse: قائمة الجهاز كاملة للاختيار */
+  const [importMode, setImportMode] = useState<ContactPickMode>("picked");
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [isPickingContacts, setIsPickingContacts] = useState(false);
   const contactSupport = useMemo(() => getContactPickerSupport(), []);
@@ -237,16 +240,18 @@ export default function EventDetail() {
   // ────────────────────────── الاستيراد ──────────────────────────
 
   /**
-   * زر «استيراد من جهات الاتصال».
+   * زر «جهات الاتصال».
    *
-   * على الأجهزة التي تدعم Contact Picker (أندرويد Chrome/Edge) يُفتح منتقي
-   * جهات الاتصال فوراً من داخل معالج الضغط نفسه، لأن المتصفح يشترط تفاعلاً
-   * مباشراً من المستخدم؛ ولو أُجّل النداء إلى ما بعد ظهور النافذة لرفضه.
-   * وبقية الأجهزة تُفتح لها نافذة الطرق البديلة مباشرة بلا رسالة خطأ.
+   * في تطبيق دعوات (الملحق الأصلي) وعلى أندرويد Chrome/Edge (Contact Picker)
+   * تُفتح جهات الاتصال فوراً من داخل معالج الضغط نفسه، لأن المتصفح يشترط
+   * تفاعلاً مباشراً من المستخدم؛ ولو أُجّل النداء إلى ما بعد ظهور النافذة لرفضه.
+   * سفاري على الآيفون تُفتح له النافذة على لوحة «من جهات الاتصال» (التعبئة
+   * التلقائية)، وبقية الأجهزة على الطرق البديلة مباشرة — بلا رسالة خطأ.
    */
   const openImportDialog = async () => {
     if (!contactSupport.supported) {
       setImportSeed([]);
+      setImportMode("picked");
       setImportMessage(null);
       setIsImportOpen(true);
       return;
@@ -254,15 +259,17 @@ export default function EventDetail() {
 
     setIsPickingContacts(true);
     try {
-      const picked = await pickContacts();
-      setImportSeed(picked);
+      const result = await openDeviceContacts();
+      setImportSeed(result.contacts);
+      setImportMode(result.mode);
       setImportMessage(
-        picked.length === 0
+        result.contacts.length === 0
           ? "لم تختر أي جهة اتصال — أعد المحاولة أو استخدم طريقة أخرى"
           : null,
       );
     } catch (err) {
       setImportSeed([]);
+      setImportMode("picked");
       setImportMessage(
         err instanceof ContactImportError
           ? err.message
@@ -287,6 +294,7 @@ export default function EventDetail() {
         onSuccess: (res) => {
           setIsImportOpen(false);
           setImportSeed([]);
+          setImportMode("picked");
           setImportMessage(null);
           // الخطوة التالية مباشرة: المضافون الجدد يصبحون محددين وجاهزين للإرسال
           if (res.ids.length > 0) {
@@ -606,7 +614,9 @@ export default function EventDetail() {
                 title={
                   contactSupport.supported
                     ? "يفتح جهات اتصال جهازك لاختيار المدعوين"
-                    : "استيراد من ملف جهات الاتصال أو CSV أو لصق قائمة"
+                    : contactSupport.via === "autofill"
+                      ? "إضافة من جهات الاتصال بالتعبئة التلقائية، أو من ملف VCF أو CSV"
+                      : "استيراد من ملف جهات الاتصال أو CSV أو لصق قائمة"
                 }
               >
                 {isPickingContacts ? (
@@ -923,6 +933,7 @@ export default function EventDetail() {
         isSaving={bulkCreateGuests.isPending}
         existingPhones={guestPhones}
         initialContacts={importSeed}
+        initialMode={importMode}
         initialMessage={importMessage}
         onImport={handleImport}
       />
