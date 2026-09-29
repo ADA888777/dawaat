@@ -1,0 +1,18 @@
+{
+  "appId": "top.dawaatly.app",
+  "appName": "دعوات",
+  "webDir": "www",
+  "server": {
+    "url": "https://dawaatly.top",
+    "cleartext": false,
+    "allowNavigation": ["dawaatly.top", "*.dawaatly.top", "*.supabase.co"]
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "backgroundColor": "#0f0e0c"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0f0e0c"
+  }
+}

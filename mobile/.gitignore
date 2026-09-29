@@ -1,0 +1,9 @@
+# مشروعا المنصتين يُولَّدان محلياً بـ «npx cap add android/ios» ولا يُرفعان
+# (المسار مثبّت بالشرطة الأولى حتى لا يُستثنى contact-picker/android و contact-picker/ios)
+/android/
+/ios/
+
+node_modules/
+package-lock.json
+.DS_Store
+*.log
