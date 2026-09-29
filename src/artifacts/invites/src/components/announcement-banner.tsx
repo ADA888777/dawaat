@@ -108,8 +108,10 @@ export function AnnouncementBanner({ place, className = "" }: AnnouncementBanner
         aria-roledescription="شريط إعلانات"
         className="relative overflow-hidden rounded-2xl border border-line bg-gradient-to-l from-cream-2 via-white to-cream-2 shadow-sm"
       >
-        {/* خط ذهبي رفيع على حافة البداية يربطها بهوية الموقع */}
-        <span aria-hidden="true" className="absolute inset-y-0 right-0 w-1 bg-gold" />
+        {/* خط ذهبي رفيع على حافة البداية يربطها بهوية الموقع — يُخفى فوق الصورة الإعلانية الكاملة */}
+        {current.layout !== "banner" && (
+          <span aria-hidden="true" className="absolute inset-y-0 right-0 w-1 bg-gold" />
+        )}
 
         <div className="grid">
           {items.map((item, i) => (
@@ -166,18 +168,68 @@ function AnnouncementSlide({
   const isInternal = item.buttonUrl.startsWith("/");
   const isExternal = /^https?:\/\//i.test(item.buttonUrl);
 
+  // الخارج يختفي سريعاً والداخل يظهر بعده بقليل، فلا يتراكب نصّان أثناء الانتقال
+  const motion = reduceMotion
+    ? ""
+    : "transition-all ease-out " + (active ? "duration-500 delay-150 " : "duration-200 ");
+  const visibility = active
+    ? "pointer-events-auto opacity-100 translate-y-0"
+    : "pointer-events-none opacity-0 " + (reduceMotion ? "" : "translate-y-2");
+
+  // صورة إعلانية كاملة (تصميم جاهز): الصورة هي الإعلان، وتُضغط كلها إن وُجد رابط
+  if (item.layout === "banner" && item.imageUrl.trim() !== "") {
+    const picture = (
+      <img
+        src={item.imageUrl}
+        alt={item.title}
+        loading="lazy"
+        className="block h-auto max-h-[400px] w-full object-cover"
+      />
+    );
+    const hasLink = isInternal || isExternal;
+    return (
+      <div
+        style={{ gridArea: "1 / 1" }}
+        aria-hidden={!active}
+        inert={!active}
+        data-layout="banner"
+        className={motion + visibility}
+      >
+        {hasLink ? (
+          isInternal ? (
+            <Link href={item.buttonUrl} aria-label={item.title} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+              {picture}
+            </Link>
+          ) : (
+            <a
+              href={item.buttonUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={item.title}
+              className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+            >
+              {picture}
+            </a>
+          )
+        ) : (
+          picture
+        )}
+        <span className="sr-only">{"إعلان " + position + " من " + total}</span>
+      </div>
+    );
+  }
+
   return (
     <div
       // كل الشرائح في نفس خلية الشبكة: ارتفاع ثابت بلا قفز
       style={{ gridArea: "1 / 1" }}
       aria-hidden={!active}
       inert={!active}
+      data-layout="card"
       className={
         "flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-4 sm:px-5 " +
-        (reduceMotion ? "" : "transition-all duration-500 ease-out ") +
-        (active
-          ? "pointer-events-auto opacity-100 translate-y-0"
-          : "pointer-events-none opacity-0 " + (reduceMotion ? "" : "translate-y-2"))
+        motion +
+        visibility
       }
     >
       <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gold/30 bg-gold/10 sm:h-12 sm:w-12">

@@ -13,6 +13,8 @@ interface AnnouncementImageFieldProps {
   disabled?: boolean;
   /** معرّف لعناصر الاختبار */
   testId?: string;
+  /** thumb: صورة صغيرة مكان الأيقونة — wide: تصميم إعلاني كامل بعرض الشريط */
+  variant?: "thumb" | "wide";
 }
 
 /**
@@ -24,7 +26,9 @@ export function AnnouncementImageField({
   onChange,
   disabled = false,
   testId = "announcement-image",
+  variant = "thumb",
 }: AnnouncementImageFieldProps) {
+  const wide = variant === "wide";
   const { toast } = useToast();
   const { uploadFile, isUploading } = useUpload();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -73,11 +77,22 @@ export function AnnouncementImageField({
         }}
       />
 
-      <div className="flex items-center gap-3">
-        {/* المعاينة بنفس شكل أيقونة البطاقة في الشريط */}
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gold/30 bg-gold/10">
+      <div className={wide ? "space-y-3" : "flex items-center gap-3"}>
+        {/* المعاينة بنفس شكل الصورة في الشريط: مربع صغير أو شريط عريض */}
+        <span
+          className={
+            wide
+              ? "flex aspect-[3/1] w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-gold/40 bg-gold/5"
+              : "flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gold/30 bg-gold/10"
+          }
+        >
           {value ? (
             <img src={value} alt="" className="h-full w-full object-cover" />
+          ) : wide ? (
+            <span className="flex flex-col items-center gap-1 text-gold-deep">
+              <ImagePlus className="h-6 w-6" strokeWidth={1.8} />
+              <span className="text-xs">ارفع تصميمك الإعلاني هنا</span>
+            </span>
           ) : (
             <ImagePlus className="h-5 w-5 text-gold-deep" strokeWidth={1.8} />
           )}
@@ -98,7 +113,7 @@ export function AnnouncementImageField({
             ) : (
               <ImagePlus className="ml-1 h-4 w-4" />
             )}
-            {value ? "تغيير الصورة" : "رفع صورة"}
+            {value ? (wide ? "تغيير التصميم" : "تغيير الصورة") : wide ? "رفع التصميم الإعلاني" : "رفع صورة"}
           </Button>
           <button
             type="button"
@@ -145,7 +160,9 @@ export function AnnouncementImageField({
       )}
 
       <p className="text-[11px] text-gray-500">
-        اختيارية — تحل محل الأيقونة. JPG أو PNG أو WebP حتى {UPLOAD_LIMITS.image.label}؛ الأنسب صورة مربعة.
+        {wide
+          ? "JPG أو PNG أو WebP حتى " + UPLOAD_LIMITS.image.label + "؛ الأنسب تصميم عريض 1200×400 بكسل (3:1) وحتى 1200×600، ويُعرض بعرض الشريط كاملاً."
+          : "اختيارية — تحل محل الأيقونة. JPG أو PNG أو WebP حتى " + UPLOAD_LIMITS.image.label + "؛ الأنسب صورة مربعة."}
       </p>
     </div>
   );
