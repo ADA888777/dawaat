@@ -19,7 +19,8 @@ import {
   type AnnouncementIcon,
 } from "@/lib/api";
 
-const ICONS: Record<AnnouncementIcon, LucideIcon> = {
+/** أيقونات الإعلانات — تُستخدم أيضاً في معاينة لوحة الأدمن */
+export const ANNOUNCEMENT_ICON_COMPONENTS: Record<AnnouncementIcon, LucideIcon> = {
   megaphone: Megaphone,
   sparkles: Sparkles,
   gift: Gift,
@@ -160,7 +161,7 @@ function AnnouncementSlide({
   total: number;
   position: number;
 }) {
-  const Icon = ICONS[item.icon] ?? Megaphone;
+  const Icon = ANNOUNCEMENT_ICON_COMPONENTS[item.icon] ?? Megaphone;
   const hasButton = item.buttonUrl.trim() !== "" && item.buttonText.trim() !== "";
   const isInternal = item.buttonUrl.startsWith("/");
   const isExternal = /^https?:\/\//i.test(item.buttonUrl);
