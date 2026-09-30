@@ -64,6 +64,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ContactImportDialog } from "@/components/contact-import-dialog";
+import { useIosShortcutImport } from "@/components/ios-shortcut-import";
 import { SendPaymentDialog, formatFee } from "@/components/send-payment-dialog";
 import { QrCode, useQrDataUrl } from "@/components/qr-code";
 import {
@@ -254,6 +255,15 @@ export default function EventDetail() {
    * التلقائية)، وبقية الأجهزة على الطرق البديلة مباشرة — بلا رسالة خطأ.
    */
   const openImportDialog = async () => {
+    if (iosShortcutMode) {
+      // الآيفون: الضغطة نفسها تفتح جهات الاتصال (أو بطاقة التفعيل أول مرة) والنافذة تعرض الحالة
+      setImportSeed([]);
+      setImportMode("picked");
+      setImportMessage(null);
+      iosShortcut.start();
+      setIsImportOpen(true);
+      return;
+    }
     if (!contactSupport.supported) {
       setImportSeed([]);
       setImportMode("picked");
@@ -318,6 +328,26 @@ export default function EventDetail() {
     },
     [refreshGuests, toast],
   );
+
+  // سفاري على الآيفون: جهات الاتصال عبر اختصار Apple — المتحكم هنا حتى تفتحها
+  // ضغطة «جهات الاتصال» في الصفحة مباشرة (داخل إيماءة المستخدم)
+  const iosShortcutMode = contactSupport.via === "shortcut";
+  const iosShortcut = useIosShortcutImport({
+    eventId,
+    enabled: hasValidId && featContacts && iosShortcutMode,
+    onImported: handleShortcutImported,
+  });
+
+  // عاد من صفحة «تفعيل جهات الاتصال»: نفتح النافذة تلقائياً ليكمل بضغطة واحدة
+  useEffect(() => {
+    if (!iosShortcut.resumedAfterActivation) return;
+    iosShortcut.acknowledgeResume();
+    setImportSeed([]);
+    setImportMode("picked");
+    setImportMessage("تم التفعيل — اضغط «من جهات الاتصال» واختر الأشخاص.");
+    setIsImportOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [iosShortcut.resumedAfterActivation]);
 
   // الاختصار يعيد المستخدم إلى /events/:id?imported=1 بعد الإرسال (قد تكون
   // علامة تبويب جديدة في سفاري): نحدّث القائمة ونزيل المعامل من الرابط.
@@ -671,7 +701,7 @@ export default function EventDetail() {
                   contactSupport.supported
                     ? "يفتح جهات اتصال جهازك لاختيار المدعوين"
                     : contactSupport.via === "shortcut"
-                      ? "استيراد من جهات اتصال iPhone عبر اختصار دعوات، أو من ملف VCF أو CSV"
+                      ? "اختر المدعوين من جهات اتصال جوالك"
                       : contactSupport.via === "autofill"
                       ? "إضافة من جهات الاتصال بالتعبئة التلقائية، أو من ملف VCF أو CSV"
                       : "استيراد من ملف جهات الاتصال أو CSV أو لصق قائمة"
@@ -994,8 +1024,7 @@ export default function EventDetail() {
         initialMode={importMode}
         initialMessage={importMessage}
         onImport={handleImport}
-        eventId={eventId}
-        onShortcutImported={handleShortcutImported}
+        iosShortcut={iosShortcutMode ? iosShortcut : undefined}
       />
 
       <ConfirmDialog
