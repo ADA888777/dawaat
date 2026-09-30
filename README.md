@@ -35,6 +35,15 @@ dawaat/
 | `VITE_SUPABASE_ANON_KEY` | مفتاح **anon public** من Supabase ← Settings ← API (وليس service_role أبداً) — إلزامي، البناء يتوقف بدونه |
 | `VITE_SUPABASE_URL` | اختياري — رابط المشروع مكتوب أصلاً في `public/config.js` |
 
+**معاينات الفروع (Worker Previews):** كل فرع/طلب دمج يبنيه Cloudflare بأمر
+`npx wrangler preview` (يظهر في GitHub كفحص «Workers Builds: dawaat»). يتطلب ذلك
+كتلة `"previews": {}` في `wrangler.jsonc` (موجودة)، وأن تكون متغيرات البناء نفسها
+مضافة في Cloudflare ← Settings ← Builds ← تبويب **Previews Base** (زر Import ينسخها
+من Production) — بدونها يتوقف البناء برسالة `add VITE_SUPABASE_ANON_KEY`.
+تُنسخ متغيرات Previews Base إلى معاينة الفرع **عند إنشائها فقط**؛ فرع أُنشئت معاينته
+قبل إضافتها يُحذف من قائمة البيئات (Production ▾ ← اسم الفرع ← Settings ← Delete)
+ليُعاد إنشاؤه بالمتغيرات مع الدفعة التالية.
+
 ---
 
 ## إعداد قاعدة البيانات (Supabase)
@@ -53,6 +62,7 @@ src/supabase/migrations/0006_send_fee_payments.sql
 src/supabase/migrations/0007_announcements_ticker.sql
 src/supabase/migrations/0008_admin_panel.sql
 src/supabase/migrations/0009_announcement_cards.sql
+src/supabase/migrations/0010_announcement_layout.sql
 ```
 
 كل الهجرات آمنة لإعادة التنفيذ على المشروع الحالي (لا تحذف بيانات ولا سياسات).
@@ -75,7 +85,7 @@ src/supabase/migrations/0009_announcement_cards.sql
 - بوابة الدفع الإلكترونية غير مربوطة بعد؛ الأعمدة `method`/`provider`/`provider_ref`
   محجوزة لربطها لاحقاً بنفس التدفق والحالات دون تغيير الواجهة.
 
-### شريط الإعلانات — الهجرتان 0007 و0009
+### شريط الإعلانات — الهجرات 0007 و0009 و0010
 
 - بطاقة أنيقة بألوان العلامة (أيقونة أو صورة + عنوان + وصف مختصر + زر اختياري)،
   وليست نصاً متحركاً. تظهر في **الصفحة الرئيسية العامة** أسفل قسم البطل، وفي
@@ -91,6 +101,10 @@ src/supabase/migrations/0009_announcement_cards.sql
   `text`/`link` باقيان للتوافق ويُنقل محتواهما تلقائياً.
 - الظهور (الجدولة + الفئة) يُفرض في سياسة RLS عبر `announcement_visible`، فلا يصل
   للزائر أو المستخدم إلا ما يحق له رؤيته.
+- شكلان للإعلان (`layout`، الهجرة 0010): **بطاقة** (أيقونة أو صورة صغيرة + عنوان
+  ووصف وزر) أو **صورة إعلانية كاملة** — تصميم جاهز يُرفع من الجهاز ويُعرض بعرض
+  الشريط كاملاً (الأنسب 1200×400)، ويصبح كله قابلاً للضغط إن أُضيف رابط. الصور
+  تُرفع من لوحة الأدمن إلى bucket `event-images` العام (رفع أو لصق رابط).
 
 ### لوحة الأدمن الكاملة — `/admin/<القسم>` (الهجرة 0008)
 

@@ -12,5 +12,9 @@
     "directory": "./src/artifacts/invites/dist/public",
     "not_found_handling": "single-page-application",
     "html_handling": "none"
-  }
+  },
+  // معاينات الفروع (Worker Previews): يبني Cloudflare كل فرع/PR بأمر «npx wrangler preview»
+  // الذي يرفض العمل بلا هذه الكتلة. فارغة لأن المعاينة تستخدم الإعدادات العليا نفسها
+  // (الأصول وتاريخ التوافق)، ومتغيرات البناء للمعاينات في Cloudflare > Settings > Builds > Previews Base.
+  "previews": {}
 }

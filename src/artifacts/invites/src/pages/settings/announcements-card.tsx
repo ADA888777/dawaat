@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ANNOUNCEMENT_ICONS,
   ANNOUNCEMENT_ICON_LABELS,
+  ANNOUNCEMENT_LAYOUT_LABELS,
   AUDIENCE_LABELS,
   announcementState,
   useCreateAnnouncement,
@@ -22,6 +23,7 @@ import {
   type Announcement,
   type AnnouncementAudience,
   type AnnouncementIcon,
+  type AnnouncementLayout,
   type AppSettings,
 } from "@/lib/api";
 import { FieldRow, SaveBar, SelectInput, SettingsCard, ToggleRow } from "./parts";
@@ -34,6 +36,11 @@ const AUDIENCE_OPTIONS = (Object.keys(AUDIENCE_LABELS) as AnnouncementAudience[]
 const ICON_OPTIONS = ANNOUNCEMENT_ICONS.map((value) => ({
   value,
   label: ANNOUNCEMENT_ICON_LABELS[value],
+}));
+
+const LAYOUT_OPTIONS = (Object.keys(ANNOUNCEMENT_LAYOUT_LABELS) as AnnouncementLayout[]).map((value) => ({
+  value,
+  label: ANNOUNCEMENT_LAYOUT_LABELS[value],
 }));
 
 const INTERVAL_OPTIONS = [3, 5, 7, 10, 15].map((n) => ({
@@ -104,6 +111,7 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newIcon, setNewIcon] = useState<AnnouncementIcon>("megaphone");
+  const [newLayout, setNewLayout] = useState<AnnouncementLayout>("card");
   const [newImageUrl, setNewImageUrl] = useState("");
   const [newButtonText, setNewButtonText] = useState("");
   const [newButtonUrl, setNewButtonUrl] = useState("");
@@ -139,9 +147,19 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
       newTitleRef.current?.focus();
       return;
     }
-    const buttonText = newButtonText.trim();
+    const isBanner = newLayout === "banner";
+    if (isBanner && newImageUrl.trim() === "") {
+      toast({
+        title: "ارفع التصميم الإعلاني أولاً",
+        description: "في شكل «صورة إعلانية كاملة» الصورة هي الإعلان نفسه.",
+        variant: "destructive",
+      });
+      return;
+    }
+    // في الصورة الكاملة لا يوجد زر ظاهر؛ الرابط (إن وُجد) يجعل الصورة كلها قابلة للضغط
+    const buttonText = isBanner ? "" : newButtonText.trim();
     const buttonUrl = newButtonUrl.trim();
-    if ((buttonText === "") !== (buttonUrl === "")) {
+    if (!isBanner && (buttonText === "") !== (buttonUrl === "")) {
       toast({
         title: "الزر يحتاج نصاً ورابطاً معاً",
         description: "املأ الحقلين أو اتركهما فارغين ليظهر الإعلان بلا زر.",
@@ -164,6 +182,7 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
         title,
         description: newDescription.trim(),
         icon: newIcon,
+        layout: newLayout,
         imageUrl: newImageUrl.trim(),
         buttonText,
         buttonUrl,
@@ -179,6 +198,7 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
           setNewButtonText("");
           setNewButtonUrl("");
           setNewIcon("megaphone");
+          setNewLayout("card");
           setNewImageUrl("");
           setNewShowOnHome(true);
           setNewShowOnDashboard(true);
@@ -191,6 +211,7 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
 
   const NewIcon = ANNOUNCEMENT_ICON_COMPONENTS[newIcon] ?? Megaphone;
   const newHasButton = newButtonText.trim() !== "" && newButtonUrl.trim() !== "";
+  const newIsBanner = newLayout === "banner";
 
   const draftOf = (a: Announcement) => drafts[a.id] ?? draftOfItem(a);
   const setDraft = (a: Announcement, patch: Partial<Draft>) =>
@@ -431,25 +452,44 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
                         aria-label="وصف الإعلان"
                       />
                       <div className="grid gap-2 sm:grid-cols-2">
-                        <label className="text-[11px] text-gray-600">
-                          الأيقونة
+                        <label className="text-[11px] text-gray-600 sm:col-span-2">
+                          شكل الإعلان
                           <div className="mt-1">
                             <SelectInput
-                              value={a.icon}
-                              onChange={(value) => patch(a, { icon: value as AnnouncementIcon })}
-                              options={ICON_OPTIONS}
+                              value={a.layout}
+                              onChange={(value) => patch(a, { layout: value as AnnouncementLayout })}
+                              options={LAYOUT_OPTIONS}
                               disabled={busy}
                             />
                           </div>
+                          {a.layout === "banner" && a.imageUrl.trim() === "" && (
+                            <p className="mt-1 text-[11px] text-amber-700">
+                              ارفع التصميم الإعلاني بالأسفل — بدونه يُعرض الإعلان كبطاقة عادية.
+                            </p>
+                          )}
                         </label>
+                        {a.layout !== "banner" && (
+                          <label className="text-[11px] text-gray-600">
+                            الأيقونة
+                            <div className="mt-1">
+                              <SelectInput
+                                value={a.icon}
+                                onChange={(value) => patch(a, { icon: value as AnnouncementIcon })}
+                                options={ICON_OPTIONS}
+                                disabled={busy}
+                              />
+                            </div>
+                          </label>
+                        )}
                         <div className="text-[11px] text-gray-600 sm:col-span-2">
-                          صورة الإعلان
+                          {a.layout === "banner" ? "التصميم الإعلاني" : "صورة الإعلان"}
                           <div className="mt-1">
                             <AnnouncementImageField
                               value={a.imageUrl}
                               onChange={(url) => patch(a, { imageUrl: url })}
                               disabled={busy}
                               testId={"announcement-image-" + a.id}
+                              variant={a.layout === "banner" ? "wide" : "thumb"}
                             />
                           </div>
                         </div>
@@ -560,9 +600,40 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
             </div>
           </div>
 
+          {/* شكل الإعلان: بطاقة أو صورة إعلانية كاملة */}
+          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="شكل الإعلان">
+            {LAYOUT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={newLayout === option.value}
+                onClick={() => setNewLayout(option.value)}
+                data-testid={"new-announcement-layout-" + option.value}
+                className={
+                  "rounded-xl border-2 px-3 py-2 text-right text-sm transition-colors " +
+                  (newLayout === option.value
+                    ? "border-gold bg-gold/10 font-bold text-gray-900"
+                    : "border-line bg-white text-gray-700 hover:border-gold/60")
+                }
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
           {/* المعاينة: نفس بطاقة الشريط كما ستظهر للعميل */}
           <div className="relative overflow-hidden rounded-2xl border border-line bg-gradient-to-l from-cream-2 via-white to-cream-2 shadow-sm">
-            <span aria-hidden="true" className="absolute inset-y-0 right-0 w-1 bg-gold" />
+            {!newIsBanner && <span aria-hidden="true" className="absolute inset-y-0 right-0 w-1 bg-gold" />}
+            {newIsBanner ? (
+              newImageUrl ? (
+                <img src={newImageUrl} alt="" className="block h-auto max-h-[400px] w-full object-cover" />
+              ) : (
+                <div className="flex aspect-[3/1] items-center justify-center text-sm text-gray-400">
+                  تصميمك الإعلاني يظهر هنا بعرض الشريط كاملاً
+                </div>
+              )
+            ) : (
             <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gold/30 bg-gold/10 sm:h-12 sm:w-12">
                 {newImageUrl ? (
@@ -585,9 +656,14 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
                 </span>
               )}
             </div>
+            )}
           </div>
 
-          <FieldRow label="العنوان *" htmlFor="new-announcement">
+          <FieldRow
+            label="العنوان *"
+            htmlFor="new-announcement"
+            hint={newIsBanner ? "لا يظهر فوق التصميم؛ يُستخدم اسماً للإعلان ونصاً بديلاً للصورة." : undefined}
+          >
             <Input
               ref={newTitleRef}
               id="new-announcement"
@@ -609,57 +685,88 @@ export function AnnouncementsCard({ settings }: { settings: AppSettings }) {
             )}
           </FieldRow>
 
-          <FieldRow label="الوصف (اختياري)" htmlFor="new-announcement-desc">
-            <Input
-              id="new-announcement-desc"
-              value={newDescription}
-              onChange={(event) => setNewDescription(event.target.value)}
-              maxLength={300}
-              placeholder="سطر مختصر يظهر تحت العنوان"
-            />
-          </FieldRow>
+          {newIsBanner ? (
+            <>
+              <div className="space-y-2">
+                <span className="block text-sm font-medium text-gray-800">التصميم الإعلاني *</span>
+                <AnnouncementImageField
+                  value={newImageUrl}
+                  onChange={setNewImageUrl}
+                  disabled={createAnnouncement.isPending}
+                  testId="new-announcement-image"
+                  variant="wide"
+                />
+              </div>
+              <FieldRow
+                label="رابط عند الضغط على التصميم (اختياري)"
+                htmlFor="new-announcement-url"
+                hint="داخلي مثل /subscription أو خارجي يبدأ بـ https:// — بدونه تُعرض الصورة فقط."
+              >
+                <Input
+                  id="new-announcement-url"
+                  value={newButtonUrl}
+                  onChange={(event) => setNewButtonUrl(event.target.value)}
+                  maxLength={500}
+                  dir="ltr"
+                  placeholder="/subscription"
+                />
+              </FieldRow>
+            </>
+          ) : (
+            <>
+              <FieldRow label="الوصف (اختياري)" htmlFor="new-announcement-desc">
+                <Input
+                  id="new-announcement-desc"
+                  value={newDescription}
+                  onChange={(event) => setNewDescription(event.target.value)}
+                  maxLength={300}
+                  placeholder="سطر مختصر يظهر تحت العنوان"
+                />
+              </FieldRow>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <FieldRow label="الأيقونة" htmlFor="new-announcement-icon" hint="تُستخدم إذا لم تُرفع صورة.">
-              <SelectInput
-                id="new-announcement-icon"
-                value={newIcon}
-                onChange={(value) => setNewIcon(value as AnnouncementIcon)}
-                options={ICON_OPTIONS}
-              />
-            </FieldRow>
-            <div className="space-y-2">
-              <span className="block text-sm font-medium text-gray-800">صورة الإعلان (اختياري)</span>
-              <AnnouncementImageField
-                value={newImageUrl}
-                onChange={setNewImageUrl}
-                disabled={createAnnouncement.isPending}
-                testId="new-announcement-image"
-              />
-            </div>
-          </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <FieldRow label="الأيقونة" htmlFor="new-announcement-icon" hint="تُستخدم إذا لم تُرفع صورة.">
+                  <SelectInput
+                    id="new-announcement-icon"
+                    value={newIcon}
+                    onChange={(value) => setNewIcon(value as AnnouncementIcon)}
+                    options={ICON_OPTIONS}
+                  />
+                </FieldRow>
+                <div className="space-y-2">
+                  <span className="block text-sm font-medium text-gray-800">صورة صغيرة مكان الأيقونة (اختياري)</span>
+                  <AnnouncementImageField
+                    value={newImageUrl}
+                    onChange={setNewImageUrl}
+                    disabled={createAnnouncement.isPending}
+                    testId="new-announcement-image"
+                  />
+                </div>
+              </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <FieldRow label="نص الزر (اختياري)" htmlFor="new-announcement-btn">
-              <Input
-                id="new-announcement-btn"
-                value={newButtonText}
-                onChange={(event) => setNewButtonText(event.target.value)}
-                maxLength={40}
-                placeholder="اعرف أكثر"
-              />
-            </FieldRow>
-            <FieldRow label="رابط الزر" htmlFor="new-announcement-url" hint="داخلي مثل /subscription أو خارجي يبدأ بـ https://">
-              <Input
-                id="new-announcement-url"
-                value={newButtonUrl}
-                onChange={(event) => setNewButtonUrl(event.target.value)}
-                maxLength={500}
-                dir="ltr"
-                placeholder="/subscription"
-              />
-            </FieldRow>
-          </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <FieldRow label="نص الزر (اختياري)" htmlFor="new-announcement-btn">
+                  <Input
+                    id="new-announcement-btn"
+                    value={newButtonText}
+                    onChange={(event) => setNewButtonText(event.target.value)}
+                    maxLength={40}
+                    placeholder="اعرف أكثر"
+                  />
+                </FieldRow>
+                <FieldRow label="رابط الزر" htmlFor="new-announcement-url" hint="داخلي مثل /subscription أو خارجي يبدأ بـ https://">
+                  <Input
+                    id="new-announcement-url"
+                    value={newButtonUrl}
+                    onChange={(event) => setNewButtonUrl(event.target.value)}
+                    maxLength={500}
+                    dir="ltr"
+                    placeholder="/subscription"
+                  />
+                </FieldRow>
+              </div>
+            </>
+          )}
 
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs text-gray-700">

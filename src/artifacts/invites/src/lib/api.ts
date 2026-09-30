@@ -1540,6 +1540,18 @@ export const ANNOUNCEMENT_ICON_LABELS: Record<AnnouncementIcon, string> = {
   calendar: "تقويم", percent: "خصم", star: "نجمة", party: "احتفال",
 };
 
+/**
+ * شكل الإعلان:
+ *   card   → بطاقة: أيقونة أو صورة صغيرة + عنوان + وصف + زر
+ *   banner → صورة إعلانية كاملة (تصميم جاهز) بعرض الشريط، تُضغط كلها إن وُجد رابط
+ */
+export type AnnouncementLayout = "card" | "banner";
+
+export const ANNOUNCEMENT_LAYOUT_LABELS: Record<AnnouncementLayout, string> = {
+  card: "بطاقة: أيقونة أو صورة صغيرة + نص",
+  banner: "صورة إعلانية كاملة (تصميم جاهز)",
+};
+
 export interface Announcement {
   id: number;
   /** عنوان البطاقة — الأساس؛ text القديم يبقى للتوافق مع بيانات سابقة */
@@ -1547,6 +1559,7 @@ export interface Announcement {
   description: string;
   imageUrl: string;
   icon: AnnouncementIcon;
+  layout: AnnouncementLayout;
   buttonText: string;
   buttonUrl: string;
   showOnHome: boolean;
@@ -1573,6 +1586,8 @@ function mapAnnouncement(r: Record<string, unknown>): Announcement {
     description: String(r.description ?? ""),
     imageUrl: String(r.image_url ?? ""),
     icon: ANNOUNCEMENT_ICONS.includes(icon) ? icon : "megaphone",
+    // قبل الهجرة 0010 لا يوجد العمود، فالكل «بطاقة»
+    layout: r.layout === "banner" ? "banner" : "card",
     buttonText: String(r.button_text ?? ""),
     buttonUrl: String(r.button_url ?? "").trim() || legacyLink,
     showOnHome: r.show_on_home === undefined ? true : Boolean(r.show_on_home),
@@ -1644,6 +1659,7 @@ export interface AnnouncementPayload {
   description?: string;
   imageUrl?: string;
   icon?: AnnouncementIcon;
+  layout?: AnnouncementLayout;
   buttonText?: string;
   buttonUrl?: string;
   showOnHome?: boolean;
@@ -1661,6 +1677,7 @@ function announcementRow(data: Partial<AnnouncementPayload>): Record<string, unk
   if (data.description !== undefined) row.description = data.description.trim().slice(0, 300);
   if (data.imageUrl !== undefined) row.image_url = data.imageUrl.trim().slice(0, 1000);
   if (data.icon !== undefined) row.icon = data.icon;
+  if (data.layout !== undefined) row.layout = data.layout;
   if (data.buttonText !== undefined) row.button_text = data.buttonText.trim().slice(0, 40);
   if (data.buttonUrl !== undefined) row.button_url = data.buttonUrl.trim().slice(0, 500);
   if (data.showOnHome !== undefined) row.show_on_home = data.showOnHome;
