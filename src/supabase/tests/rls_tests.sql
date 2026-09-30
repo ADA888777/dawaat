@@ -583,6 +583,85 @@ begin
   reset role;
   raise notice '✅ 21: بطاقات الإعلانات — الحقول الجديدة وأماكن العرض والحماية';
 
+  -- =================================================================
+  -- اختبار 22 [استيراد جهات الاتصال بالرمز — الهجرة 0011]
+  -- =================================================================
+  reset role;
+  select id into v_event from public.events where title = 'زفاف أليس';
+
+  -- بوب لا يستطيع إنشاء رمز لمناسبة أليس
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  begin
+    perform public.create_contact_import_token(v_event);
+    raise exception 'فشل 22أ: بوب أنشأ رمزاً لمناسبة أليس!';
+  exception when others then
+    if sqlerrm like 'فشل 22%' then raise; end if;
+    if sqlerrm <> 'EVENT_NOT_OWNED' then raise exception 'فشل 22أ: خطأ غير متوقع %', sqlerrm; end if;
+  end;
+
+  -- أليس تنشئ رمزاً لمناسبتها
+  perform set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', true);
+  select t.token into v_slug from public.create_contact_import_token(v_event) t;
+  if v_slug is null or length(v_slug) < 32 then raise exception 'فشل 22ب: رمز غير صالح %', v_slug; end if;
+
+  -- الاختصار (بلا جلسة = anon) يرسل جهات الاتصال بالرمز:
+  -- توحيد الأرقام، تفضيل الجوال على الأرضي، تكرار داخل الدفعة، مدعو موجود مسبقاً، رقم غير صالح
+  set local role anon;
+  perform set_config('request.jwt.claim.sub','', true);
+  select public.import_contacts_with_token(v_slug, jsonb_build_array(
+      jsonb_build_object('name', 'سعود', 'phones', jsonb_build_array('0112345678', '٠٥٠١١١١١١١')),
+      jsonb_build_object('name', 'نورة', 'phone', '+966 50 222 2222'),
+      jsonb_build_object('name', 'نورة مكررة', 'phone', '0502222222'),
+      jsonb_build_object('name', 'مدعو أليس القديم', 'phone', '0500000001'),
+      jsonb_build_object('name', 'بلا رقم', 'phone', 'abc')
+  ))::text into v_slug2;
+  if v_slug2 not like '%"inserted": 2%' or v_slug2 not like '%"duplicates": 2%' or v_slug2 not like '%"skipped": 1%' then
+    raise exception 'فشل 22ج: نتيجة الاستيراد %', v_slug2;
+  end if;
+
+  reset role;
+  select count(*) into v_cnt from public.guests where event_id = v_event and phone in ('+966501111111', '+966502222222');
+  if v_cnt <> 2 then raise exception 'فشل 22د: المدعوون المستوردون % بدل 2', v_cnt; end if;
+  select count(*) into v_cnt from public.guests where event_id = v_event and phone = '+966112345678';
+  if v_cnt <> 0 then raise exception 'فشل 22هـ: أُدخل الرقم الأرضي بدل الجوال!'; end if;
+
+  -- الرمز يُستهلك: إعادة الإرسال مرفوضة
+  set local role anon;
+  begin
+    perform public.import_contacts_with_token(v_slug, '[]'::jsonb);
+    raise exception 'فشل 22و: قُبل الرمز مرتين!';
+  exception when others then
+    if sqlerrm like 'فشل 22%' then raise; end if;
+    if sqlerrm <> 'TOKEN_USED' then raise exception 'فشل 22و: خطأ غير متوقع %', sqlerrm; end if;
+  end;
+
+  -- رمز عشوائي مرفوض
+  begin
+    perform public.import_contacts_with_token(repeat('a', 48), '[]'::jsonb);
+    raise exception 'فشل 22ز: قُبل رمز مزيّف!';
+  exception when others then
+    if sqlerrm like 'فشل 22%' then raise; end if;
+    if sqlerrm <> 'INVALID_TOKEN' then raise exception 'فشل 22ز: خطأ غير متوقع %', sqlerrm; end if;
+  end;
+
+  -- anon لا يقرأ جدول الرموز أصلاً (لا صلاحية على الجدول)؛ أليس تقرأ حالة رمزها فقط
+  begin
+    select count(*) into v_cnt from public.contact_import_tokens;
+    if v_cnt <> 0 then raise exception 'فشل 22ح: anon يرى % رمزاً!', v_cnt; end if;
+  exception when insufficient_privilege then
+    null; -- المطلوب: الرفض
+  end;
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  select count(*) into v_cnt from public.contact_import_tokens;
+  if v_cnt <> 0 then raise exception 'فشل 22ط: بوب يرى رموز أليس!'; end if;
+  perform set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', true);
+  select imported_count into v_cnt from public.contact_import_status(v_slug);
+  if v_cnt <> 2 then raise exception 'فشل 22ي: حالة الرمز % بدل 2', v_cnt; end if;
+  reset role;
+  raise notice '✅ 22: استيراد جهات الاتصال بالرمز — ملكية، توحيد، تفضيل الجوال، منع التكرار، استهلاك الرمز';
+
   raise notice '';
   raise notice '════════════════════════════════';
   raise notice '  نجحت جميع اختبارات RLS ✅';

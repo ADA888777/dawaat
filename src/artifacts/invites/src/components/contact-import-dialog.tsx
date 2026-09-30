@@ -15,6 +15,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IosShortcutImport } from "@/components/ios-shortcut-import";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,6 +47,7 @@ import {
   isPhoneLikeName,
   isSaudiMobile,
 } from "@/lib/phone";
+import type { ContactImportStatus } from "@/lib/api";
 
 interface ContactImportDialogProps {
   open: boolean;
@@ -67,6 +69,10 @@ interface ContactImportDialogProps {
   initialMessage?: string | null;
   /** يُسلّم المحددين فقط للأب ليحفظهم */
   onImport: (contacts: PickedContact[]) => void;
+  /** المناسبة — يحتاجها اختصار الآيفون لإنشاء رمز الاستيراد */
+  eventId?: number;
+  /** وصلت الجهات من اختصار الآيفون مباشرة إلى قاعدة البيانات: الأب يحدّث القائمة ويغلق */
+  onShortcutImported?: (status: ContactImportStatus) => void;
 }
 
 /** صف في قائمة المراجعة: جهة اتصال + حالة تحديدها */
@@ -99,9 +105,10 @@ function downloadCsvTemplate() {
  *
  * - تطبيق دعوات (Capacitor) أو متصفح يدعم Contact Picker (أندرويد Chrome/Edge)
  *   يفتح جهات الاتصال مباشرة، مع إبقاء البدائل ظاهرة تحته.
- * - سفاري على الآيفون (ويب) يرى مباشرة لوحة «من جهات الاتصال»: حقل اسم وحقل
- *   جوال يعبّئهما سفاري من جهات الاتصال (جهة في كل مرة — حد النظام نفسه)،
- *   وملف VCF يبقى احتياطياً لعشرات الأسماء دفعة واحدة. لا رسالة «غير مدعوم».
+ * - سفاري على الآيفون (ويب): الزر الأساسي «استيراد من جهات اتصال iPhone» يفتح
+ *   اختصار «Dawaat – Contacts» (اختيار متعدد، ترسل الجهات إلى الـ API برمز مؤقت
+ *   وتصل مباشرة إلى القائمة). ثانوياً «من جهات الاتصال» بالتعبئة التلقائية (جهة
+ *   في كل مرة)، وملف VCF احتياطي فقط. لا رسالة «غير مدعوم».
  * - متصفحات الكمبيوتر لا ترى رسالة خطأ، بل مباشرة: VCF، CSV، إضافة يدوية.
  * - كل الطرق تنتهي بنفس قائمة المراجعة: أرقام موحّدة (+9665…) بلا تكرار،
  *   وتحديد الكل أو أشخاص معينين قبل الحفظ.
@@ -116,11 +123,14 @@ export function ContactImportDialog({
   initialMode,
   initialMessage,
   onImport,
+  eventId,
+  onShortcutImported,
 }: ContactImportDialogProps) {
   const support = useMemo(() => getContactPickerSupport(), []);
   const isIos = support.platform === "ios";
-  /** سفاري على الآيفون: التعبئة التلقائية هي الطريق المباشر الوحيد */
-  const useAutofill = support.via === "autofill";
+  /** سفاري على الآيفون: الاختصار أساسي، والتعبئة التلقائية طريق ثانٍ داخل الصفحة */
+  const useShortcut = support.via === "shortcut" && !!eventId && !!onShortcutImported;
+  const useAutofill = support.via === "autofill" || support.via === "shortcut";
   /** الطريقة المباشرة الأولى لهذا الجهاز عند فشل غيرها */
   const primaryMethod: Method = useAutofill ? "autofill" : "vcf";
   const fileAccept = (fallback: string) =>
@@ -222,7 +232,7 @@ export function ContactImportDialog({
     setNotice(initialMessage ?? null);
     // سفاري على الآيفون: لوحة «من جهات الاتصال» (التعبئة التلقائية) مباشرة.
     // الأجهزة التي تفتح جهات الاتصال فعلاً تبدأ بزر الفتح بلا طريقة محددة.
-    setMethod(support.supported ? null : useAutofill ? "autofill" : null);
+    setMethod(support.supported ? null : useAutofill && !useShortcut ? "autofill" : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialContacts, initialMode, initialMessage]);
 
@@ -523,7 +533,14 @@ export function ContactImportDialog({
             </>
           ) : useAutofill ? (
             <>
-              {/* سفاري على الآيفون: لوحة التعبئة من جهات الاتصال هي الواجهة المباشرة */}
+              {useShortcut && (
+                <>
+                  {/* سفاري على الآيفون: الاختصار هو الطريق الأساسي (اختيار متعدد) */}
+                  <IosShortcutImport eventId={eventId!} onImported={onShortcutImported!} disabled={busy || isSaving} />
+                  <p className="text-center text-xs text-gray-500">أو أضف جهة في كل مرة</p>
+                </>
+              )}
+              {/* التعبئة التلقائية من جهات الاتصال: جهة واحدة في كل مرة */}
               <button
                 type="button"
                 onClick={() => {
@@ -572,7 +589,7 @@ export function ContactImportDialog({
                 : "ملف جهات الاتصال من الجوال",
               () => chooseFileMethod("vcf"),
               useAutofill
-                ? "احتياطي: لعشرات الأسماء دفعة واحدة"
+                ? (useShortcut ? "احتياطي" : "احتياطي: لعشرات الأسماء دفعة واحدة")
                 : !support.supported && support.platform !== "desktop"
                   ? "الأنسب لجهازك"
                   : null,
@@ -672,8 +689,9 @@ export function ContactImportDialog({
                 </Button>
               </div>
               <p className="text-[11px] leading-relaxed text-gray-500">
-                لا يتيح سفاري اختيار عدة جهات دفعة واحدة من المواقع — لعشرات الأسماء
-                استخدم «استيراد ملف VCF».
+                {useShortcut
+                  ? "لاختيار عدة أشخاص دفعة واحدة استخدم «استيراد من جهات اتصال iPhone» بالأعلى."
+                  : "لا يتيح سفاري اختيار عدة جهات دفعة واحدة من المواقع — لعشرات الأسماء استخدم «استيراد ملف VCF»."}
               </p>
             </form>
           )}

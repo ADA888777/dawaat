@@ -1,5 +1,6 @@
 import { appUrl } from "@/lib/supabase";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import {
   useGetEvent,
@@ -14,6 +15,10 @@ import {
   paymentErrorMessage,
   PAYMENT_STATUS_LABELS,
   MAX_IMPORT_ROWS,
+  getListGuestsQueryKey,
+  getGetEventQueryKey,
+  getListEventsQueryKey,
+  type ContactImportStatus,
   phoneMatchKey,
   toWesternDigits,
   formatPhoneForDisplay,
@@ -280,6 +285,57 @@ export default function EventDetail() {
       setIsImportOpen(true);
     }
   };
+
+  // ─────────── استيراد من اختصار الآيفون (Dawaat – Contacts) ───────────
+  // الجهات تصل إلى قاعدة البيانات عبر /api/contacts/import مباشرة، فلا حاجة
+  // لحفظها من هنا: نعيد جلب القائمة والعدّادات فقط (بلا إعادة تحميل الصفحة).
+  const queryClient = useQueryClient();
+  const refreshGuests = useCallback(
+    () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: getListGuestsQueryKey(eventId) }),
+        queryClient.invalidateQueries({ queryKey: getGetEventQueryKey(eventId) }),
+        queryClient.invalidateQueries({ queryKey: getListEventsQueryKey() }),
+      ]),
+    [queryClient, eventId],
+  );
+
+  const handleShortcutImported = useCallback(
+    (status: ContactImportStatus) => {
+      void refreshGuests();
+      setIsImportOpen(false);
+      setImportSeed([]);
+      setImportMessage(null);
+      toast({
+        title:
+          status.importedCount > 0
+            ? "وصل " + status.importedCount + " مدعو من جهات اتصال الآيفون"
+            : "لم يُضف أحد — كل الأرقام موجودة مسبقاً",
+        description:
+          (status.duplicateCount > 0 ? "مكرر: " + status.duplicateCount + ". " : "") +
+          (status.skippedCount > 0 ? "بلا رقم صالح: " + status.skippedCount + "." : ""),
+      });
+    },
+    [refreshGuests, toast],
+  );
+
+  // الاختصار يعيد المستخدم إلى /events/:id?imported=1 بعد الإرسال (قد تكون
+  // علامة تبويب جديدة في سفاري): نحدّث القائمة ونزيل المعامل من الرابط.
+  useEffect(() => {
+    if (!hasValidId || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("imported") !== "1") return;
+    params.delete("imported");
+    const query = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      window.location.pathname + (query ? "?" + query : "") + window.location.hash,
+    );
+    void refreshGuests();
+    toast({ title: "وصلت جهات الاتصال من الآيفون", description: "تم تحديث قائمة المدعوين." });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasValidId, eventId]);
 
   /** أرقام المدعوين الحاليين — تُمرَّر للنافذة لكشف المكرر قبل الحفظ */
   const guestPhones = useMemo(
@@ -614,7 +670,9 @@ export default function EventDetail() {
                 title={
                   contactSupport.supported
                     ? "يفتح جهات اتصال جهازك لاختيار المدعوين"
-                    : contactSupport.via === "autofill"
+                    : contactSupport.via === "shortcut"
+                      ? "استيراد من جهات اتصال iPhone عبر اختصار دعوات، أو من ملف VCF أو CSV"
+                      : contactSupport.via === "autofill"
                       ? "إضافة من جهات الاتصال بالتعبئة التلقائية، أو من ملف VCF أو CSV"
                       : "استيراد من ملف جهات الاتصال أو CSV أو لصق قائمة"
                 }
@@ -936,6 +994,8 @@ export default function EventDetail() {
         initialMode={importMode}
         initialMessage={importMessage}
         onImport={handleImport}
+        eventId={eventId}
+        onShortcutImported={handleShortcutImported}
       />
 
       <ConfirmDialog

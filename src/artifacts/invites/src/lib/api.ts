@@ -517,6 +517,85 @@ export function useBulkCreateGuests() {
   });
 }
 
+// ---------------- استيراد جهات الاتصال عبر اختصار الآيفون (الهجرة 0011) ----------------
+
+/** اسم الاختصار كما يجب أن يكون على جهاز المستخدم — يطابقه رابط التشغيل حرفياً */
+export const IOS_SHORTCUT_NAME = "Dawaat – Contacts";
+
+/** رابط تشغيل الاختصار ومعه الرمز كنص إدخال */
+export function iosShortcutRunUrl(token: string): string {
+  return (
+    "shortcuts://run-shortcut?name=" +
+    encodeURIComponent(IOS_SHORTCUT_NAME) +
+    "&input=text&text=" +
+    encodeURIComponent(token)
+  );
+}
+
+export interface ContactImportToken {
+  token: string;
+  expiresAt: string;
+}
+
+/**
+ * رمز استخدام واحد مرتبط بالمستخدم والمناسبة، صالح 15 دقيقة.
+ * يُنشأ في قاعدة البيانات (create_contact_import_token) التي تتحقق من ملكية المناسبة.
+ */
+export function useCreateContactImportToken() {
+  return useMutation({
+    mutationFn: async ({ eventId }: { eventId: number }): Promise<ContactImportToken> => {
+      const { data, error } = await supabase.rpc("create_contact_import_token", { p_event_id: eventId });
+      throwIf(error);
+      const row = (Array.isArray(data) ? data[0] : data) as { token: string; expires_at: string } | undefined;
+      if (!row?.token) throw new Error("تعذر إنشاء رمز الاستيراد");
+      return { token: row.token, expiresAt: String(row.expires_at) };
+    },
+  });
+}
+
+export interface ContactImportStatus {
+  usedAt: string | null;
+  expiresAt: string;
+  importedCount: number;
+  duplicateCount: number;
+  skippedCount: number;
+}
+
+export const getContactImportStatusQueryKey = (token: string) => ["contact-import", token] as const;
+
+/**
+ * يستطلع حالة الرمز كل ثانيتين ما دام غير مستخدم وغير منتهٍ، حتى تظهر
+ * جهات الاتصال في القائمة فور وصولها من الاختصار دون تحديث الصفحة.
+ */
+export function useContactImportStatus(token: string | null) {
+  return useQuery({
+    queryKey: getContactImportStatusQueryKey(token ?? ""),
+    enabled: !!token,
+    refetchInterval: (query) => {
+      const status = query.state.data as ContactImportStatus | undefined;
+      if (!status) return 2000;
+      if (status.usedAt) return false;
+      if (new Date(status.expiresAt).getTime() <= Date.now()) return false;
+      return 2000;
+    },
+    queryFn: async (): Promise<ContactImportStatus> => {
+      const { data, error } = await supabase.rpc("contact_import_status", { p_token: token });
+      throwIf(error);
+      const row = (Array.isArray(data) ? data[0] : data) as
+        | { used_at: string | null; expires_at: string; imported_count: number; duplicate_count: number; skipped_count: number }
+        | undefined;
+      if (!row) throw new Error("الرمز غير موجود");
+      return {
+        usedAt: row.used_at ?? null,
+        expiresAt: String(row.expires_at),
+        importedCount: Number(row.imported_count ?? 0),
+        duplicateCount: Number(row.duplicate_count ?? 0),
+        skippedCount: Number(row.skipped_count ?? 0),
+      };
+    },
+  });
+}
+
 export function useUpdateGuest() {
   const qc = useQueryClient();
   return useMutation({
@@ -1038,6 +1117,8 @@ export interface AppSettings {
   announcementInterval: number;
   /** مفاتيح تفعيل/تعطيل الميزات — تُخزَّن jsonb ويعدّلها الأدمن فقط */
   featureFlags: FeatureFlags;
+  /** رابط iCloud لاختصار «Dawaat – Contacts» على الآيفون؛ فارغ = يُعرض شرح التثبيت فقط */
+  iosShortcutUrl: string;
 }
 
 export type FeatureKey =
@@ -1060,7 +1141,7 @@ export const FEATURE_DEFAULTS: FeatureFlags = {
 };
 
 export const FEATURE_LABELS: Record<FeatureKey, { label: string; hint: string }> = {
-  contacts_import: { label: "استيراد جهات الاتصال", hint: "زر «جهات الاتصال» في صفحة المناسبة (المنتقي وVCF وCSV)." },
+  contacts_import: { label: "استيراد جهات الاتصال", hint: "زر «جهات الاتصال» في صفحة المناسبة (اختصار الآيفون، منتقي أندرويد، VCF وCSV)." },
   qr_code: { label: "رمز QR ورابط الدعوة", hint: "زر «رمز QR والرابط» في صفحة المناسبة." },
   whatsapp_send: { label: "إرسال الدعوات عبر واتساب", hint: "زر «إرسال الدعوات» وقائمة الإرسال." },
   subscription_page: { label: "صفحة الباقات", hint: "رابط «الباقة» في قائمة المستخدم." },
@@ -1117,6 +1198,7 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   tickerSpeed: "ticker_speed",
   announcementInterval: "announcement_interval",
   featureFlags: "feature_flags",
+  iosShortcutUrl: "ios_shortcut_url",
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -1151,6 +1233,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   tickerSpeed: 60,
   announcementInterval: 5,
   featureFlags: { ...FEATURE_DEFAULTS },
+  iosShortcutUrl: "",
 };
 
 export const getGetAppSettingsQueryKey = () => ["app-settings"] as const;

@@ -1,7 +1,7 @@
 import path from 'path';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
@@ -21,10 +21,35 @@ if (Number.isNaN(port) || port <= 0) {
 // اضبط BASE_PATH فقط إذا نُشر الموقع داخل مسار فرعي.
 const basePath = process.env.BASE_PATH ?? '/';
 
+/**
+ * runtime-config.json: العنوان ومفتاح anon العام لـ Supabase كملف ثابت بجانب
+ * الحزمة، يقرأه Worker دعوات (worker/index.ts) عند تمرير طلبات
+ * /api/contacts/import إلى قاعدة البيانات. المفتاح نفسه مضمّن أصلاً في حزمة
+ * JavaScript التي يحمّلها كل زائر، فلا يكشف هذا الملف شيئاً جديداً، ويغني عن
+ * ضبط متغير تشغيل يدوياً في Cloudflare (ويعمل تلقائياً في معاينات الفروع).
+ */
+function emitRuntimeConfig(): Plugin {
+  return {
+    name: 'dawaat-runtime-config',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'runtime-config.json',
+        source: JSON.stringify({
+          supabaseUrl: (process.env.VITE_SUPABASE_URL ?? '').trim(),
+          supabaseAnonKey: (process.env.VITE_SUPABASE_ANON_KEY ?? '').trim(),
+        }),
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: basePath,
   plugins: [
     react(),
+    emitRuntimeConfig(),
     tailwindcss(),
     runtimeErrorOverlay(),
     ...(process.env.NODE_ENV !== 'production' &&

@@ -5,11 +5,20 @@
 {
   "name": "dawaat",
   "compatibility_date": "2026-09-01",
+  // Worker صغير أمام الأصول: يخدم /api/* (استيراد جهات الاتصال من اختصار الآيفون)
+  // ويترك كل شيء آخر للأصول الثابتة عبر الربط ASSETS — سلوك الموقع لم يتغير.
+  "main": "worker/index.ts",
+  // الـ Worker يقرأ عنوان Supabase ومفتاح anon العام من runtime-config.json الذي
+  // يكتبه البناء بجانب الحزمة، فلا يحتاج أي متغير تشغيل. يمكن تجاوز ذلك اختيارياً
+  // بمتغيري SUPABASE_URL / SUPABASE_ANON_KEY من لوحة Cloudflare (Settings ← Variables)،
+  // وkeep_vars يمنع النشر من حذف ما يُضاف هناك.
+  "keep_vars": true,
   "build": {
     "command": "[ -n \"$VITE_SUPABASE_ANON_KEY\" ] || { echo 'ERROR: add VITE_SUPABASE_ANON_KEY in Cloudflare > Settings > Builds > Variables'; exit 1; } && cd src && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/invites build"
   },
   "assets": {
     "directory": "./src/artifacts/invites/dist/public",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "html_handling": "none"
   },
