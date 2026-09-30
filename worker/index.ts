@@ -8,9 +8,11 @@
  *   GET  /api/health            ← فحص جاهزية بسيط.
  *   أي مسار آخر                 ← الأصول الثابتة (تطبيق React) كما كان تماماً.
  *
- * لا أسرار هنا: SUPABASE_URL عام (نفسه في public/config.js)، وSUPABASE_ANON_KEY هو
- * مفتاح anon العام نفسه الذي يحمّله كل زائر مع الموقع — يُضبط كمتغير تشغيل في Cloudflare
- * (Settings ← Variables) ولا يُكتب في المستودع. التحقق الفعلي كله في قاعدة البيانات.
+ * لا أسرار هنا: العنوان ومفتاح anon العام (نفسه الذي يحمّله كل زائر داخل حزمة
+ * JavaScript) يُقرآن من runtime-config.json الذي يكتبه البناء بجانب الحزمة
+ * (vite.config.ts ← emitRuntimeConfig)، ويمكن تجاوزهما بمتغيري التشغيل
+ * SUPABASE_URL / SUPABASE_ANON_KEY في Cloudflare. لا service_role إطلاقاً —
+ * التحقق الفعلي كله في قاعدة البيانات (الرمز المؤقت + RLS).
  */
 
 interface Env {
@@ -117,15 +119,49 @@ async function readPayload(request: Request): Promise<{ token: string; contacts:
   return { token, contacts };
 }
 
+interface SupabaseTarget {
+  url: string;
+  anonKey: string;
+}
+
+let cachedTarget: SupabaseTarget | null = null;
+
+/**
+ * إعدادات Supabase: متغيرات التشغيل أولاً (إن ضُبطت)، وإلا runtime-config.json
+ * من الأصول المبنية. تُحفظ في الذاكرة بعد أول قراءة ناجحة.
+ */
+async function resolveSupabase(request: Request, env: Env): Promise<SupabaseTarget | null> {
+  const fromEnv: SupabaseTarget = {
+    url: (env.SUPABASE_URL ?? "").trim().replace(/\/$/, ""),
+    anonKey: (env.SUPABASE_ANON_KEY ?? "").trim(),
+  };
+  if (fromEnv.url && fromEnv.anonKey) return fromEnv;
+  if (cachedTarget) return cachedTarget;
+
+  try {
+    const origin = new URL(request.url).origin;
+    const res = await env.ASSETS.fetch(new Request(origin + "/runtime-config.json", { method: "GET" }));
+    if (!res.ok) return null;
+    const cfg = (await res.json()) as { supabaseUrl?: unknown; supabaseAnonKey?: unknown };
+    const url = (fromEnv.url || String(cfg.supabaseUrl ?? "")).trim().replace(/\/$/, "");
+    const anonKey = (fromEnv.anonKey || String(cfg.supabaseAnonKey ?? "")).trim();
+    if (!url || !anonKey) return null;
+    cachedTarget = { url, anonKey };
+    return cachedTarget;
+  } catch {
+    return null;
+  }
+}
+
 async function handleImport(request: Request, env: Env): Promise<Response> {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
   if (request.method !== "POST") return json({ ok: false, code: "METHOD_NOT_ALLOWED" }, 405, { allow: "POST, OPTIONS" });
 
-  const supabaseUrl = (env.SUPABASE_URL ?? "").replace(/\/$/, "");
-  const anonKey = env.SUPABASE_ANON_KEY ?? "";
-  if (!supabaseUrl || !anonKey) {
+  const target = await resolveSupabase(request, env);
+  if (!target) {
     return json({ ok: false, code: "NOT_CONFIGURED", message: "خدمة الاستيراد غير مهيأة على هذا النطاق." }, 503);
   }
+  const { url: supabaseUrl, anonKey } = target;
 
   const payload = await readPayload(request);
   if (payload instanceof Response) return payload;
