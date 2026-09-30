@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Mic, Square, UploadCloud, ChevronRight, Loader2, Play, Pause } from "lucide-react";
 import { useUpload } from "@/hooks/use-upload";
+import { EventQuotaNotice, useEventQuota } from "@/components/event-quota-notice";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 
@@ -65,6 +66,9 @@ export default function EventForm() {
   
   const createEvent = useCreateEvent();
   const updateEvent = useUpdateEvent();
+  // حد الباقة يُفرض في قاعدة البيانات (EVENTS_LIMIT_REACHED)؛ هنا نمنع تعبئة
+  // النموذج بخطواته الثلاث عندما تكون النتيجة رفضاً مؤكداً
+  const quota = useEventQuota();
   
   const { uploadFile, isUploading } = useUpload();
   const { toast } = useToast();
@@ -301,6 +305,23 @@ export default function EventForm() {
     return (
       <AppLayout>
         <div className="flex justify-center py-32"><Loader2 className="w-8 h-8 animate-spin text-gold" /></div>
+      </AppLayout>
+    );
+  }
+
+  // إنشاء جديد والحصة مكتملة: بطاقة واضحة بدل نموذج سيُرفض عند الحفظ
+  if (!isEditing && !quota.isLoading && quota.reached) {
+    return (
+      <AppLayout>
+        <div className="max-w-4xl mx-auto p-6 md:p-10">
+          <div className="mb-8">
+            <Link href="/events" className="text-gray-600 hover:text-gray-900 inline-flex items-center gap-1 text-sm font-medium mb-4">
+              <ChevronRight className="w-4 h-4" /> عودة للدعوات
+            </Link>
+            <h1 className="text-3xl font-bold text-gray-900">إنشاء دعوة جديدة</h1>
+          </div>
+          <EventQuotaNotice variant="block" />
+        </div>
       </AppLayout>
     );
   }

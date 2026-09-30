@@ -17,6 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListEventsQueryKey } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { EventQuotaNotice } from "@/components/event-quota-notice";
 
 export default function EventsList() {
   const { data: events, isLoading } = useListEvents();
@@ -82,6 +83,9 @@ export default function EventsList() {
             إنشاء دعوة جديدة
           </Link>
         </div>
+
+        {/* يظهر فقط عند اكتمال حصة الباقة — قبل أن يحاول المستخدم إنشاء دعوة تُرفض */}
+        <EventQuotaNotice />
 
         {isLoading ? (
           <div className="flex items-center justify-center py-32">
