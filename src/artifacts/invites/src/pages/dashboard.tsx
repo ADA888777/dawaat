@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import { Link } from "wouter";
 import { AnnouncementBanner } from "@/components/announcement-banner";
+import { EventQuotaNotice } from "@/components/event-quota-notice";
 
 export default function Dashboard() {
   const { data: summary, isLoading: isLoadingSummary } = useGetDashboardSummary();
@@ -25,6 +26,9 @@ export default function Dashboard() {
             إنشاء دعوة جديدة
           </Link>
         </div>
+
+        {/* يظهر فقط عند اكتمال حصة الباقة */}
+        <EventQuotaNotice />
 
         {isLoadingSummary ? (
           <div className="flex items-center justify-center py-20">
