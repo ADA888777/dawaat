@@ -40,6 +40,9 @@ dawaat/
 كتلة `"previews": {}` في `wrangler.jsonc` (موجودة)، وأن تكون متغيرات البناء نفسها
 مضافة في Cloudflare ← Settings ← Builds ← تبويب **Previews Base** (زر Import ينسخها
 من Production) — بدونها يتوقف البناء برسالة `add VITE_SUPABASE_ANON_KEY`.
+تُنسخ متغيرات Previews Base إلى معاينة الفرع **عند إنشائها فقط**؛ فرع أُنشئت معاينته
+قبل إضافتها يُحذف من قائمة البيئات (Production ▾ ← اسم الفرع ← Settings ← Delete)
+ليُعاد إنشاؤه بالمتغيرات مع الدفعة التالية.
 
 ---
 
