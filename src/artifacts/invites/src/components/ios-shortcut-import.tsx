@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Download, Loader2, RotateCcw, Smartphone } from "lucide-react";
+import { CheckCircle2, ContactRound, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  IOS_SHORTCUT_NAME,
   iosShortcutRunUrl,
   useContactImportStatus,
   useCreateContactImportToken,
@@ -11,42 +10,61 @@ import {
 } from "@/lib/api";
 
 /**
- * استيراد جهات اتصال الآيفون عبر اختصار Apple Shortcuts «Dawaat – Contacts».
+ * جهات اتصال الآيفون من سفاري — عبر اختصار Apple Shortcuts «Dawaat – Contacts»
+ * كجسر مخفي عن العميل قدر الإمكان.
  *
- * سفاري لا يسمح لأي موقع بالوصول لجهات الاتصال (لا توجد نافذة صلاحية أصلاً)،
- * فالاختصار هو الطريق الوحيد لاختيار عدة أشخاص دفعة واحدة من الويب. الهدف هنا
- * أقل احتكاك ممكن للعميل — لا شرح ولا إعدادات:
+ * الحقيقة التقنية: سفاري لا يسمح لأي موقع بالوصول لجهات الاتصال (لا توجد نافذة
+ * صلاحية أصلاً)، والاختصار هو الطريق الوحيد لاختيار عدة أشخاص دفعة واحدة من الويب.
+ * ما يفرضه ذلك على العميل ولا يمكن تجاوزه:
+ *   • مرة واحدة على الجهاز: «تفعيل جهات الاتصال» ← صفحة صغيرة من Apple ← «إضافة
+ *     اختصار» ← يرجع إلى دعوات (تُفتح النافذة تلقائياً).
+ *   • قد يسأل سفاري «فتح في الاختصارات؟» وقد يطلب iOS صلاحية جهات الاتصال في أول
+ *     تشغيل — نوافذ نظام لا نتحكم بها.
+ * وبعدها: «من جهات الاتصال» ← تظهر جهات اتصال الجوال ← يحدد ← «تم» ← تُضاف
+ * الأسماء والأرقام إلى الدعوة مباشرة بلا إعادة تحميل.
  *
- *   • أول مرة على هذا الجهاز: الضغطة تفتح مباشرة صفحة «إضافة اختصار» في iCloud
- *     (ضغطة واحدة هناك)، وعند العودة للموقع تُفتح نافذة جهات الاتصال تلقائياً.
- *   • بعدها كل مرة: الضغطة تفتح الاختصار برمز مؤقت ← منتقي جهات الاتصال (اختيار
- *     متعدد) ← أول تشغيل يطلب iOS صلاحية جهات الاتصال ← ترجع الأسماء إلى القائمة
- *     مباشرة بلا إعادة تحميل.
+ * الأمان: رمز استخدام واحد (create_contact_import_token — جلسة مسجّلة ومناسبة
+ * يملكها المستخدم) صالح 15 دقيقة؛ الاختصار لا يحمل أي مفتاح. التوحيد ومنع التكرار
+ * في قاعدة البيانات (import_contacts_with_token). الرمز يُنشأ مسبقاً لأن سفاري لا
+ * يفتح مخططاً مخصصاً (shortcuts://) إلا داخل إيماءة الضغط نفسها.
  *
- * الرمز: create_contact_import_token (جلسة مسجّلة، مناسبة يملكها) صالح 15 دقيقة
- * ولاستخدام واحد. يُنشأ مسبقاً عند ظهور الزر لأن سفاري لا يفتح مخططاً مخصصاً
- * (shortcuts://) إلا داخل إيماءة الضغط نفسها، لا بعد انتظار طلب شبكة.
- *
- * الكشف: إن لم تختفِ الصفحة بعد فتح shortcuts:// فالتطبيق لم يُفتح (أو رُفض)،
- * وإن عاد المستخدم بلا استيراد فالاختصار غالباً غير مضاف — في الحالتين يظهر زر
- * «إضافة اختصار دعوات» بضغطة واحدة، والشرح المفصل خلف رابط «كيف؟».
+ * الواجهة لا تذكر VCF أو CSV أو Web API أو «المتصفح لا يدعم» — فقط ما يحتاجه العميل.
  */
 
-type Phase = "idle" | "creating" | "waiting" | "not-installed" | "done" | "expired" | "error";
+export type IosShortcutPhase =
+  | "idle"
+  | "needs-activation"
+  | "creating"
+  | "waiting"
+  | "failed"
+  | "done"
+  | "expired"
+  | "error";
 
-interface IosShortcutImportProps {
-  eventId: number;
-  /** عند وصول الجهات: يحدّث الأب القائمة ويغلق النافذة */
-  onImported: (status: ContactImportStatus) => void;
-  disabled?: boolean;
+export interface IosShortcutController {
+  /** رابط الاختصار مضبوط في الإعدادات (بدونه لا يمكن التفعيل) */
+  available: boolean;
+  /** فُعّل على هذا الجهاز (أو عاد من صفحة التفعيل) */
+  ready: boolean;
+  phase: IosShortcutPhase;
+  status: ContactImportStatus | undefined;
+  errorMessage: string | null;
+  /** الضغطة الرئيسية: يفتح جهات الاتصال (أو يعرض بطاقة التفعيل أول مرة) — داخل إيماءة */
+  start: () => void;
+  /** «تفعيل جهات الاتصال»: إلى صفحة إضافة الاختصار، والعودة تفتح النافذة تلقائياً */
+  activate: () => void;
+  cancel: () => void;
+  /** عدنا للتو من صفحة التفعيل — الأب يفتح النافذة ثم يستدعي acknowledgeResume */
+  resumedAfterActivation: boolean;
+  acknowledgeResume: () => void;
 }
 
-/** هذا الجهاز أضاف الاختصار (أو عاد من صفحة إضافته) — الضغطة التالية تفتحه مباشرة */
+/** هذا الجهاز فعّل جهات الاتصال (أو عاد من صفحة التفعيل) — الضغطة التالية تفتحها مباشرة */
 const READY_KEY = "dawaat.iosShortcutReady";
-/** ذهبنا إلى صفحة إضافة الاختصار وننتظر العودة — يفتح الأب نافذة جهات الاتصال تلقائياً */
-export const PENDING_INSTALL_KEY = "dawaat.iosShortcutPendingInstall";
+/** ذهبنا إلى صفحة التفعيل وننتظر العودة — يفتح الأب نافذة جهات الاتصال تلقائياً */
+const PENDING_INSTALL_KEY = "dawaat.iosShortcutPendingInstall";
 
-/** مهلة نافذة «فتح في الاختصارات؟» التي يعرضها سفاري قبل مغادرة الصفحة */
+/** مهلة نافذة «فتح في الاختصارات؟» التي قد يعرضها سفاري قبل مغادرة الصفحة */
 const NOT_OPENED_TIMEOUT_MS = 6000;
 /** بعد العودة من الاختصار: إن لم تصل الجهات خلال هذه المدة فالاختصار لم يعمل */
 const RETURNED_WITHOUT_IMPORT_MS = 4000;
@@ -69,8 +87,8 @@ function writeFlag(storage: Storage | undefined, key: string, on: boolean) {
 const local = () => (typeof window === "undefined" ? undefined : window.localStorage);
 const session = () => (typeof window === "undefined" ? undefined : window.sessionStorage);
 
-/** هل عدنا للتو من صفحة إضافة الاختصار؟ يقرؤها الأب ليفتح النافذة، ثم تُمسح */
-export function consumePendingShortcutInstall(): boolean {
+/** هل عدنا للتو من صفحة التفعيل؟ تُمسح العلامة ويُعدّ الجهاز مفعّلاً */
+function consumePendingShortcutInstall(): boolean {
   const pending = readFlag(session(), PENDING_INSTALL_KEY);
   if (pending) {
     writeFlag(session(), PENDING_INSTALL_KEY, false);
@@ -79,21 +97,27 @@ export function consumePendingShortcutInstall(): boolean {
   return pending;
 }
 
-export function IosShortcutImport({ eventId, onImported, disabled = false }: IosShortcutImportProps) {
+interface UseIosShortcutImportOptions {
+  eventId: number;
+  /** false خارج سفاري الآيفون أو عند تعطيل الميزة — لا يُنشأ أي رمز */
+  enabled: boolean;
+  onImported: (status: ContactImportStatus) => void;
+}
+
+export function useIosShortcutImport({ eventId, enabled, onImported }: UseIosShortcutImportOptions): IosShortcutController {
   const { data: settings } = useGetAppSettings();
   const shortcutUrl = (settings?.iosShortcutUrl ?? "").trim();
+  const available = shortcutUrl !== "";
   const createToken = useCreateContactImportToken();
 
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [phase, setPhase] = useState<IosShortcutPhase>("idle");
   const [token, setToken] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [showInstall, setShowInstall] = useState(false);
-  const [showHow, setShowHow] = useState(false);
   const [ready, setReady] = useState(() => readFlag(local(), READY_KEY));
+  const [resumedAfterActivation, setResumed] = useState(false);
   const hiddenOnceRef = useRef(false);
   const notifiedRef = useRef<string | null>(null);
   const returnTimerRef = useRef<number | null>(null);
-  /** الرمز الجاهز مسبقاً مع وقت انتهائه، حتى تفتح الضغطة الاختصار فوراً */
   const readyTokenRef = useRef<{ token: string; expiresAt: number } | null>(null);
   const mintingRef = useRef<Promise<{ token: string; expiresAt: number } | null> | null>(null);
 
@@ -112,7 +136,7 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
         return next;
       })
       .catch((err: unknown) => {
-        setErrorMessage(err instanceof Error ? err.message : "تعذر إنشاء رمز الاستيراد.");
+        setErrorMessage(err instanceof Error ? err.message : "تعذر تجهيز الاستيراد. حاول مرة أخرى.");
         return null;
       })
       .finally(() => {
@@ -123,14 +147,23 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
-  // رمز جاهز منذ ظهور الزر (صالح 15 دقيقة؛ إنشاء رمز جديد يُلغي القديم غير المستخدم)
+  // العودة من صفحة التفعيل: الجهاز مفعّل الآن، والأب يفتح النافذة ليكمل بضغطة واحدة
+  useEffect(() => {
+    if (!enabled) return;
+    if (consumePendingShortcutInstall()) {
+      setReady(true);
+      setResumed(true);
+    }
+  }, [enabled]);
+
+  // رمز جاهز مسبقاً للأجهزة المفعّلة، حتى تفتح ضغطة «من جهات الاتصال» الاختصار فوراً
   useEffect(() => {
     readyTokenRef.current = null;
-    void ensureToken();
+    if (enabled && eventId > 0 && ready && available) void ensureToken();
     return () => {
       if (returnTimerRef.current) window.clearTimeout(returnTimerRef.current);
     };
-  }, [ensureToken]);
+  }, [enabled, eventId, ready, available, ensureToken]);
 
   // وصول النتيجة: الرمز استُهلك → الأب يحدّث القائمة ويغلق
   useEffect(() => {
@@ -140,7 +173,7 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
       notifiedRef.current = token;
       readyTokenRef.current = null;
       if (returnTimerRef.current) window.clearTimeout(returnTimerRef.current);
-      writeFlag(local(), READY_KEY, true); // الاختصار يعمل على هذا الجهاز قطعاً
+      writeFlag(local(), READY_KEY, true); // يعمل على هذا الجهاز قطعاً
       setReady(true);
       setPhase("done");
       onImported(status);
@@ -152,14 +185,6 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
     }
   }, [status, token, onImported]);
 
-  const markNotInstalled = () => {
-    writeFlag(local(), READY_KEY, false);
-    setReady(false);
-    setPhase("not-installed");
-    setShowInstall(true);
-  };
-
-  /** فتح الاختصار بالرمز — يجب أن يحدث داخل إيماءة الضغط نفسها */
   const launch = (minted: { token: string; expiresAt: number }) => {
     setToken(minted.token);
     setPhase("waiting");
@@ -167,19 +192,15 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
 
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
-        hiddenOnceRef.current = true; // تطبيق الاختصارات فُتح فعلاً
+        hiddenOnceRef.current = true; // غادرنا إلى الاختصار فعلاً
         return;
       }
-      // عاد إلى الصفحة: إن لم تصل الجهات خلال ثوانٍ فالاختصار لم يعمل (غير مضاف أو أُلغي)
+      // عاد إلى الصفحة: إن لم تصل الجهات خلال ثوانٍ فالاختصار لم يعمل (أو أُلغي)
       if (hiddenOnceRef.current) {
         document.removeEventListener("visibilitychange", onVisibility);
         if (returnTimerRef.current) window.clearTimeout(returnTimerRef.current);
         returnTimerRef.current = window.setTimeout(() => {
-          // قد يكون ألغى الاختيار فقط، فلا نُلغي «جاهز» — نعرض زر الإضافة كخيار
-          if (notifiedRef.current !== minted.token) {
-            setPhase("idle");
-            setShowInstall(true);
-          }
+          if (notifiedRef.current !== minted.token) setPhase("failed");
         }, RETURNED_WITHOUT_IMPORT_MS);
       }
     };
@@ -187,7 +208,10 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
     window.setTimeout(() => {
       if (!hiddenOnceRef.current) {
         document.removeEventListener("visibilitychange", onVisibility);
-        markNotInstalled();
+        // لم يُفتح شيء: الاختصار غير مضاف (أو رُفضت نافذة سفاري) — نعيد التفعيل
+        writeFlag(local(), READY_KEY, false);
+        setReady(false);
+        setPhase("failed");
       }
     }, NOT_OPENED_TIMEOUT_MS);
 
@@ -195,17 +219,17 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
     window.location.href = iosShortcutRunUrl(minted.token);
   };
 
-  /** أول مرة على هذا الجهاز: مباشرة إلى صفحة «إضافة اختصار»، وعند العودة تُفتح النافذة تلقائياً */
-  const goInstall = () => {
+  const activate = () => {
+    if (!available) return;
     writeFlag(session(), PENDING_INSTALL_KEY, true);
     window.location.href = shortcutUrl;
   };
 
   const start = () => {
     setErrorMessage(null);
-    setShowInstall(false);
-    if (!ready && shortcutUrl) {
-      goInstall();
+    if (!available) return;
+    if (!ready) {
+      setPhase("needs-activation");
       return;
     }
     const current = readyTokenRef.current;
@@ -213,7 +237,6 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
       launch(current); // متزامن داخل الإيماءة
       return;
     }
-    // لم يجهز الرمز بعد (أو انتهى): أنشئه ثم افتح
     setPhase("creating");
     void ensureToken().then((minted) => {
       if (!minted) {
@@ -224,107 +247,126 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
     });
   };
 
+  const cancel = () => {
+    if (returnTimerRef.current) window.clearTimeout(returnTimerRef.current);
+    setToken(null);
+    setPhase("idle");
+  };
+
+  return {
+    available,
+    ready,
+    phase,
+    status,
+    errorMessage,
+    start,
+    activate,
+    cancel,
+    resumedAfterActivation,
+    acknowledgeResume: () => setResumed(false),
+  };
+}
+
+/**
+ * لوحة العميل داخل نافذة جهات الاتصال على الآيفون: زر واحد، ولا كلمة تقنية.
+ */
+export function IosShortcutPanel({ controller, disabled = false }: { controller: IosShortcutController; disabled?: boolean }) {
+  const { phase, ready, status, errorMessage, start, activate, cancel } = controller;
   const busy = phase === "creating" || phase === "waiting";
-  const firstTime = !ready && !!shortcutUrl;
+
+  const activationCard = (
+    <div className="space-y-3 rounded-xl border border-gold/40 bg-gold/5 p-4 text-right" data-testid="ios-shortcut-activate">
+      <div className="flex items-start gap-2">
+        <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-gold-deep" />
+        <div>
+          <p className="text-sm font-bold text-gray-900">لإضافة جهات اتصالك لأول مرة</p>
+          <p className="text-xs leading-relaxed text-gray-700">
+            خطوة واحدة من Apple: تفتح صفحة صغيرة اضغط فيها «إضافة اختصار»، ثم ارجع إلى دعوات.
+          </p>
+        </div>
+      </div>
+      <Button
+        type="button"
+        onClick={activate}
+        disabled={disabled}
+        className="h-auto w-full bg-ink py-3 text-base font-bold text-gold-light hover:bg-ink-soft"
+        data-testid="ios-shortcut-activate-button"
+      >
+        <ContactRound className="ml-2 h-5 w-5" /> تفعيل جهات الاتصال
+      </Button>
+    </div>
+  );
+
+  if (!ready && (phase === "idle" || phase === "needs-activation")) {
+    return (
+      <div data-testid="ios-shortcut-import" data-phase={phase} data-ready="0">
+        {activationCard}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2" data-testid="ios-shortcut-import" data-phase={phase} data-ready={ready ? "1" : "0"}>
-      <Button
-        type="button"
-        onClick={start}
-        disabled={disabled || busy}
-        className="h-auto w-full flex-col gap-0.5 bg-ink py-3 text-gold-light hover:bg-ink-soft"
-        data-testid="ios-shortcut-button"
-      >
-        <span className="flex items-center gap-2 text-base font-bold">
-          {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Smartphone className="h-5 w-5" />}
-          استيراد من جهات اتصال iPhone
-        </span>
-        <span className="text-xs font-normal opacity-80">
-          {phase === "waiting"
-            ? "بانتظار جهات الاتصال…"
-            : firstTime
-              ? "أول مرة: اضغط «إضافة اختصار» ثم ارجع هنا"
-              : "اختر عدة أشخاص دفعة واحدة"}
-        </span>
-      </Button>
+      {phase !== "failed" && (
+        <Button
+          type="button"
+          onClick={start}
+          disabled={disabled || busy}
+          className="h-auto w-full flex-col gap-0.5 bg-ink py-3 text-gold-light hover:bg-ink-soft"
+          data-testid="ios-shortcut-button"
+        >
+          <span className="flex items-center gap-2 text-base font-bold">
+            {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <ContactRound className="h-5 w-5" />}
+            من جهات الاتصال
+          </span>
+          <span className="text-xs font-normal opacity-80">
+            {phase === "waiting" ? "بانتظار جهات الاتصال…" : "اختر عدة أشخاص دفعة واحدة"}
+          </span>
+        </Button>
+      )}
 
       {phase === "waiting" && (
         <div className="space-y-2 rounded-lg border border-line bg-cream-2 px-3 py-2 text-right" data-testid="ios-shortcut-waiting">
-          <p className="text-xs leading-relaxed text-gray-700">
-            اختر الأشخاص ثم اضغط «تم» — تظهر الأسماء هنا فور وصولها.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="button" onClick={() => setShowInstall((v) => !v)} className="text-xs text-gold-deep underline">
-              لم يُفتح شيء؟
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (returnTimerRef.current) window.clearTimeout(returnTimerRef.current);
-                setPhase("idle");
-                setToken(null);
-              }}
-              className="inline-flex items-center gap-1 text-xs text-gray-600 underline"
-            >
-              <RotateCcw className="h-3 w-3" /> إلغاء
-            </button>
-          </div>
+          <p className="text-xs leading-relaxed text-gray-700">اختر الأشخاص ثم اضغط «تم» — تظهر الأسماء هنا فور وصولها.</p>
+          <button type="button" onClick={cancel} className="inline-flex items-center gap-1 text-xs text-gray-600 underline">
+            <RotateCcw className="h-3 w-3" /> إلغاء
+          </button>
+        </div>
+      )}
+
+      {phase === "failed" && (
+        <div className="space-y-3" data-testid="ios-shortcut-failed">
+          <p className="text-sm text-gray-800">لم تُفتح جهات الاتصال.</p>
+          <Button
+            type="button"
+            onClick={start}
+            disabled={disabled}
+            variant="outline"
+            className="w-full border-line"
+            data-testid="ios-shortcut-retry"
+          >
+            <RotateCcw className="ml-2 h-4 w-4" /> حاول مرة أخرى
+          </Button>
+          {activationCard}
         </div>
       )}
 
       {phase === "done" && status && (
         <p className="flex items-center gap-1 text-xs text-emerald-700" data-testid="ios-shortcut-done">
-          <CheckCircle2 className="h-4 w-4" /> وصل {status.importedCount} مدعو من الآيفون
+          <CheckCircle2 className="h-4 w-4" /> أُضيف {status.importedCount} مدعو
           {status.duplicateCount > 0 ? "، ومكرر " + status.duplicateCount : ""}
           {status.skippedCount > 0 ? "، وبلا رقم صالح " + status.skippedCount : ""}.
         </p>
       )}
 
       {phase === "expired" && (
-        <p className="text-xs text-amber-800">انتهت صلاحية الرمز (15 دقيقة) قبل وصول الجهات — اضغط الزر مرة أخرى.</p>
+        <p className="text-xs text-amber-800">مرّ وقت طويل قبل وصول الأسماء — اضغط «من جهات الاتصال» مرة أخرى.</p>
       )}
 
       {phase === "error" && errorMessage && (
         <p className="text-xs text-red-600" role="alert">
           {errorMessage}
         </p>
-      )}
-
-      {(showInstall || phase === "not-installed") && (
-        <div className="space-y-2 rounded-lg border border-line bg-white p-3 text-right" data-testid="ios-shortcut-install">
-          {shortcutUrl ? (
-            <>
-              <p className="text-sm text-gray-800" data-testid="ios-shortcut-not-installed">
-                اختصار دعوات غير مضاف على هذا الجهاز بعد — أضفه بضغطة واحدة ثم ارجع هنا.
-              </p>
-              <Button
-                type="button"
-                onClick={goInstall}
-                variant="outline"
-                className="w-full border-gold text-gold-deep"
-                data-testid="ios-shortcut-install-link"
-              >
-                <Download className="ml-2 h-4 w-4" /> إضافة اختصار دعوات
-              </Button>
-              <button type="button" onClick={() => setShowHow((v) => !v)} className="text-xs text-gold-deep underline">
-                {showHow ? "إخفاء الخطوات" : "كيف؟"}
-              </button>
-              {showHow && (
-                <ol className="list-decimal space-y-1 pr-4 text-xs leading-relaxed text-gray-700">
-                  <li>«إضافة اختصار دعوات» ← تُفتح صفحة الاختصار ← اضغط «إضافة اختصار».</li>
-                  <li>ارجع إلى الموقع (زر الرجوع في سفاري) ← اضغط «استيراد من جهات اتصال iPhone» ← «فتح».</li>
-                  <li>اختر الأشخاص ← «تم». أول مرة فقط يطلب iOS السماح بجهات الاتصال وبـ dawaatly.top.</li>
-                  <li className="text-gray-500">اسم الاختصار يجب أن يبقى «{IOS_SHORTCUT_NAME}».</li>
-                </ol>
-              )}
-            </>
-          ) : (
-            <p className="text-xs text-amber-800" data-testid="ios-shortcut-missing-url">
-              رابط اختصار دعوات لم يُضبط بعد في الإعدادات — استخدم «من جهات الاتصال» بالأسفل مؤقتاً.
-            </p>
-          )}
-        </div>
       )}
     </div>
   );
