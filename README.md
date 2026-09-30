@@ -35,6 +35,12 @@ dawaat/
 | `VITE_SUPABASE_ANON_KEY` | مفتاح **anon public** من Supabase ← Settings ← API (وليس service_role أبداً) — إلزامي، البناء يتوقف بدونه |
 | `VITE_SUPABASE_URL` | اختياري — رابط المشروع مكتوب أصلاً في `public/config.js` |
 
+**معاينات الفروع (Worker Previews):** كل فرع/طلب دمج يبنيه Cloudflare بأمر
+`npx wrangler preview` (يظهر في GitHub كفحص «Workers Builds: dawaat»). يتطلب ذلك
+كتلة `"previews": {}` في `wrangler.jsonc` (موجودة)، وأن تكون متغيرات البناء نفسها
+مضافة في Cloudflare ← Settings ← Builds ← تبويب **Previews Base** (زر Import ينسخها
+من Production) — بدونها يتوقف البناء برسالة `add VITE_SUPABASE_ANON_KEY`.
+
 ---
 
 ## إعداد قاعدة البيانات (Supabase)
