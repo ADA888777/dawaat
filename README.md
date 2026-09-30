@@ -33,12 +33,12 @@ dawaat/
 جهات الاتصال) و`GET /api/health`. المسارات الداخلية للتطبيق (`/events/12` …) تُعاد لها
 `index.html` (سلوك SPA) كما في السابق.
 
-متغيرات **التشغيل** (Cloudflare ← Workers ← dawaat ← Settings ← Variables and Secrets):
-
-| المتغير | القيمة |
-|---|---|
-| `SUPABASE_URL` | مكتوب في `wrangler.jsonc` (عام) |
-| `SUPABASE_ANON_KEY` | مفتاح **anon public** نفسه (وليس service_role أبداً) — يضيفه الأدمن مرة واحدة كـ Variable؛ `keep_vars: true` في `wrangler.jsonc` يحفظه عبر عمليات النشر. بدونه يردّ `/api/contacts/import` بـ 503 `NOT_CONFIGURED` |
+لا يحتاج الـ Worker أي متغير تشغيل: البناء يكتب `runtime-config.json` بجانب الحزمة
+(العنوان ومفتاح **anon public** نفسه المضمّن أصلاً في حزمة JavaScript لكل زائر — وليس
+service_role أبداً) ويقرأه الـ Worker عبر ربط `ASSETS`. اختيارياً يمكن تجاوزه بمتغيري
+التشغيل `SUPABASE_URL` / `SUPABASE_ANON_KEY` (Settings ← Variables and Secrets؛
+`keep_vars: true` يحفظهما عبر عمليات النشر). إن غاب الاثنان يردّ `/api/contacts/import`
+بـ 503 `NOT_CONFIGURED`.
 
 متغيرات البناء المطلوبة في Cloudflare ← Settings ← Builds ← Variables:
 
