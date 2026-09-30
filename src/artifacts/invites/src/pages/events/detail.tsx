@@ -64,6 +64,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ContactImportDialog } from "@/components/contact-import-dialog";
+import { consumePendingShortcutInstall } from "@/components/ios-shortcut-import";
 import { SendPaymentDialog, formatFee } from "@/components/send-payment-dialog";
 import { QrCode, useQrDataUrl } from "@/components/qr-code";
 import {
@@ -318,6 +319,18 @@ export default function EventDetail() {
     },
     [refreshGuests, toast],
   );
+
+  // عاد من صفحة «إضافة اختصار» (آيفون): نفتح نافذة جهات الاتصال تلقائياً ليكمل بضغطة
+  useEffect(() => {
+    if (!hasValidId || !featContacts) return;
+    if (consumePendingShortcutInstall()) {
+      setImportSeed([]);
+      setImportMode("picked");
+      setImportMessage("أضفت الاختصار؟ اضغط «استيراد من جهات اتصال iPhone» واختر الأشخاص.");
+      setIsImportOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasValidId, featContacts]);
 
   // الاختصار يعيد المستخدم إلى /events/:id?imported=1 بعد الإرسال (قد تكون
   // علامة تبويب جديدة في سفاري): نحدّث القائمة ونزيل المعامل من الرابط.
