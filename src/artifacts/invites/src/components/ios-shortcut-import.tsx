@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Download, Loader2, RotateCcw, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +27,10 @@ import {
  * من فتح الرابط فتطبيق الاختصارات لم يُفتح، فنعرض زر «إضافة اختصار دعوات».
  * وإن فُتح التطبيق لكن الاختصار غير موجود، يعود المستخدم بلا استيراد فيرى
  * الزر نفسه أسفل حالة الانتظار.
+ *
+ * مهم: سفاري لا يسمح بفتح رابط بمخطط مخصص (shortcuts://) إلا داخل إيماءة
+ * المستخدم نفسها، ولا يبقى ذلك بعد انتظار طلب شبكة. لذلك يُنشأ الرمز مسبقاً عند
+ * ظهور الزر، وضغطة الزر تفتح الاختصار فوراً وبشكل متزامن.
  */
 
 type Phase = "idle" | "creating" | "waiting" | "not-installed" | "done" | "expired" | "error";
@@ -51,8 +55,41 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
   const [showInstall, setShowInstall] = useState(false);
   const hiddenOnceRef = useRef(false);
   const notifiedRef = useRef<string | null>(null);
+  /** الرمز الجاهز مسبقاً مع وقت انتهائه، حتى تفتح الضغطة الاختصار فوراً */
+  const readyRef = useRef<{ token: string; expiresAt: number } | null>(null);
+  const mintingRef = useRef<Promise<{ token: string; expiresAt: number } | null> | null>(null);
 
   const { data: status } = useContactImportStatus(phase === "waiting" ? token : null);
+
+  /** إنشاء رمز (أو إعادة الجاهز إن كان صالحاً لأكثر من دقيقة) */
+  const ensureToken = useCallback((): Promise<{ token: string; expiresAt: number } | null> => {
+    const ready = readyRef.current;
+    if (ready && ready.expiresAt - Date.now() > 60_000) return Promise.resolve(ready);
+    if (mintingRef.current) return mintingRef.current;
+    const promise = createToken
+      .mutateAsync({ eventId })
+      .then((created) => {
+        const next = { token: created.token, expiresAt: new Date(created.expiresAt).getTime() };
+        readyRef.current = next;
+        return next;
+      })
+      .catch((err: unknown) => {
+        setErrorMessage(err instanceof Error ? err.message : "تعذر إنشاء رمز الاستيراد.");
+        return null;
+      })
+      .finally(() => {
+        mintingRef.current = null;
+      });
+    mintingRef.current = promise;
+    return promise;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId]);
+
+  // رمز جاهز منذ ظهور الزر (صالح 15 دقيقة؛ إنشاء رمز جديد يُلغي القديم غير المستخدم)
+  useEffect(() => {
+    readyRef.current = null;
+    void ensureToken();
+  }, [ensureToken]);
 
   // وصول النتيجة: الرمز استُهلك → الأب يحدّث القائمة ويغلق
   useEffect(() => {
@@ -60,30 +97,22 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
     if (status.usedAt) {
       if (notifiedRef.current === token) return;
       notifiedRef.current = token;
+      readyRef.current = null;
       setPhase("done");
       onImported(status);
       return;
     }
     if (new Date(status.expiresAt).getTime() <= Date.now()) {
+      readyRef.current = null;
       setPhase("expired");
     }
   }, [status, token, onImported]);
 
-  const start = async () => {
-    setErrorMessage(null);
-    setShowInstall(false);
-    hiddenOnceRef.current = false;
-    setPhase("creating");
-    let created: { token: string; expiresAt: string };
-    try {
-      created = await createToken.mutateAsync({ eventId });
-    } catch (err) {
-      setPhase("error");
-      setErrorMessage(err instanceof Error ? err.message : "تعذر إنشاء رمز الاستيراد.");
-      return;
-    }
-    setToken(created.token);
+  /** فتح الاختصار بالرمز — يجب أن يحدث داخل إيماءة الضغط نفسها */
+  const launch = (ready: { token: string; expiresAt: number }) => {
+    setToken(ready.token);
     setPhase("waiting");
+    hiddenOnceRef.current = false;
 
     // هل غادرنا الصفحة فعلاً إلى تطبيق الاختصارات؟
     const onVisibility = () => {
@@ -98,8 +127,27 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
       }
     }, NOT_OPENED_TIMEOUT_MS);
 
-    // فتح الاختصار — تغيير الموقع (لا window.open) حتى لا يحجبه مانع النوافذ
-    window.location.href = iosShortcutRunUrl(created.token);
+    // تغيير الموقع (لا window.open) حتى لا يحجبه مانع النوافذ
+    window.location.href = iosShortcutRunUrl(ready.token);
+  };
+
+  const start = () => {
+    setErrorMessage(null);
+    setShowInstall(false);
+    const ready = readyRef.current;
+    if (ready && ready.expiresAt - Date.now() > 60_000) {
+      launch(ready); // متزامن داخل الإيماءة
+      return;
+    }
+    // لم يجهز الرمز بعد (أو انتهى): أنشئه ثم افتح
+    setPhase("creating");
+    void ensureToken().then((minted) => {
+      if (!minted) {
+        setPhase("error");
+        return;
+      }
+      launch(minted);
+    });
   };
 
   const installBlock = (
@@ -131,7 +179,7 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
     <div className="space-y-2" data-testid="ios-shortcut-import" data-phase={phase}>
       <Button
         type="button"
-        onClick={() => void start()}
+        onClick={start}
         disabled={disabled || phase === "creating" || phase === "waiting"}
         className="h-auto w-full flex-col gap-0.5 bg-ink py-3 text-gold-light hover:bg-ink-soft"
         data-testid="ios-shortcut-button"
@@ -165,6 +213,7 @@ export function IosShortcutImport({ eventId, onImported, disabled = false }: Ios
               onClick={() => {
                 setPhase("idle");
                 setToken(null);
+                // نفس الرمز يبقى صالحاً للمحاولة التالية
               }}
               className="inline-flex items-center gap-1 text-xs text-gray-600 underline"
             >
