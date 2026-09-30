@@ -5,16 +5,28 @@
 {
   "name": "dawaat",
   "compatibility_date": "2026-09-01",
+  // Worker صغير أمام الأصول: يخدم /api/* (استيراد جهات الاتصال من اختصار الآيفون)
+  // ويترك كل شيء آخر للأصول الثابتة عبر الربط ASSETS — سلوك الموقع لم يتغير.
+  "main": "worker/index.ts",
+  // متغيرات التشغيل العامة. مفتاح anon (عام أيضاً) يُضبط من لوحة Cloudflare
+  // Settings ← Variables باسم SUPABASE_ANON_KEY، وkeep_vars يمنع النشر من حذفه.
+  "vars": { "SUPABASE_URL": "https://ykuvsnmddipctrylwxzh.supabase.co" },
+  "keep_vars": true,
   "build": {
     "command": "[ -n \"$VITE_SUPABASE_ANON_KEY\" ] || { echo 'ERROR: add VITE_SUPABASE_ANON_KEY in Cloudflare > Settings > Builds > Variables'; exit 1; } && cd src && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/invites build"
   },
   "assets": {
     "directory": "./src/artifacts/invites/dist/public",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "html_handling": "none"
   },
   // معاينات الفروع (Worker Previews): يبني Cloudflare كل فرع/PR بأمر «npx wrangler preview»
-  // الذي يرفض العمل بلا هذه الكتلة. فارغة لأن المعاينة تستخدم الإعدادات العليا نفسها
-  // (الأصول وتاريخ التوافق)، ومتغيرات البناء للمعاينات في Cloudflare > Settings > Builds > Previews Base.
-  "previews": {}
+  // الذي يرفض العمل بلا هذه الكتلة. المعاينة تستخدم الإعدادات العليا نفسها (الأصول
+  // وتاريخ التوافق)، ومتغيرات البناء للمعاينات في Cloudflare > Settings > Builds > Previews Base.
+  "previews": {
+    // نفس الرابط العام للمعاينات؛ مفتاح anon للمعاينات (إن أُريد تشغيل /api فيها)
+    // يُضبط بـ «npx wrangler preview base-config secret put SUPABASE_ANON_KEY»
+    "vars": { "SUPABASE_URL": "https://ykuvsnmddipctrylwxzh.supabase.co" }
+  }
 }

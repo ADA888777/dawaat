@@ -26,7 +26,19 @@ dawaat/
 
 المستودع مربوط بـ Cloudflare Workers Builds، وأمر النشر الافتراضي `npx wrangler deploy`
 يقرأ `wrangler.jsonc` في الجذر، فيبني التطبيق من `src/` ثم ينشر الناتج
-(`src/artifacts/invites/dist/public`). أي دفع إلى `main` = نشر جديد.
+(`src/artifacts/invites/dist/public`) مع Worker صغير (`worker/index.ts`). أي دفع إلى `main` = نشر جديد.
+
+الـ Worker يخدم مسارين فقط ويترك كل ما عداهما للأصول الثابتة كما كان:
+`POST /api/contacts/import` (استقبال جهات الاتصال من اختصار الآيفون — انظر قسم
+جهات الاتصال) و`GET /api/health`. المسارات الداخلية للتطبيق (`/events/12` …) تُعاد لها
+`index.html` (سلوك SPA) كما في السابق.
+
+متغيرات **التشغيل** (Cloudflare ← Workers ← dawaat ← Settings ← Variables and Secrets):
+
+| المتغير | القيمة |
+|---|---|
+| `SUPABASE_URL` | مكتوب في `wrangler.jsonc` (عام) |
+| `SUPABASE_ANON_KEY` | مفتاح **anon public** نفسه (وليس service_role أبداً) — يضيفه الأدمن مرة واحدة كـ Variable؛ `keep_vars: true` في `wrangler.jsonc` يحفظه عبر عمليات النشر. بدونه يردّ `/api/contacts/import` بـ 503 `NOT_CONFIGURED` |
 
 متغيرات البناء المطلوبة في Cloudflare ← Settings ← Builds ← Variables:
 
@@ -63,6 +75,7 @@ src/supabase/migrations/0007_announcements_ticker.sql
 src/supabase/migrations/0008_admin_panel.sql
 src/supabase/migrations/0009_announcement_cards.sql
 src/supabase/migrations/0010_announcement_layout.sql
+src/supabase/migrations/0011_contact_import_tokens.sql
 ```
 
 كل الهجرات آمنة لإعادة التنفيذ على المشروع الحالي (لا تحذف بيانات ولا سياسات).
@@ -135,12 +148,66 @@ src/supabase/migrations/0010_announcement_layout.sql
 | تطبيق iPhone | منتقي النظام (`CNContactPickerViewController`) — بلا إذن | نعم |
 | تطبيق Android | قراءة جهات الاتصال بإذن ← قائمة تحديد وبحث داخل النافذة (وبلا إذن: منتقي النظام لجهة واحدة) | نعم |
 | Android Chrome/Edge (ويب) | Contact Picker API | نعم |
-| iPhone Safari (ويب) | **تعبئة تلقائية** من جهات الاتصال: حقل اسم وحقل جوال (`autocomplete="name"/"tel"`) يعبّئهما سفاري فوق لوحة المفاتيح ← «إضافة للقائمة» وتكرار | لا — جهة في كل مرة (حد النظام؛ لا توجد Web API لذلك). ملف VCF احتياطي لعشرات الأسماء دفعة واحدة |
+| iPhone Safari (ويب) | **اختصار Apple Shortcuts «Dawaat – Contacts»** (الطريق الأساسي — التفاصيل أدناه)؛ ثانوياً تعبئة تلقائية من جهات الاتصال (حقل اسم وجوال `autocomplete="name"/"tel"`) جهة في كل مرة | نعم عبر الاختصار. ملف VCF احتياطي فقط |
 | الكمبيوتر | VCF / CSV / لصق قائمة / إدخال يدوي | — |
 
 الاكتشاف والتفرّع في `src/artifacts/invites/src/lib/contact-picker.ts`
-(`getContactPickerSupport().via`: `native` / `web-api` / `autofill` / `none`)،
-والواجهة في `components/contact-import-dialog.tsx`.
+(`getContactPickerSupport().via`: `native` / `web-api` / `shortcut` / `autofill` / `none`)،
+والواجهة في `components/contact-import-dialog.tsx` و`components/ios-shortcut-import.tsx`.
+
+### استيراد جهات اتصال الآيفون عبر اختصار Shortcuts — الهجرة 0011
+
+سفاري لا يملك أي Web API لاختيار جهات الاتصال، لذلك يعمل الآيفون (ويب) عبر اختصار
+يثبّته المستخدم مرة واحدة. لا يحمل الاختصار ولا الواجهة أي مفتاح سري — فقط رمز مؤقت:
+
+1. المستخدم (مسجّل الدخول) يضغط «استيراد من جهات اتصال iPhone» في نافذة جهات الاتصال
+   ← الموقع يستدعي `create_contact_import_token(event_id)` (تتطلب جلسة، وتتحقق أن
+   المناسبة له) فيحصل على رمز عشوائي 64 خانة (~244 بت) صالح **15 دقيقة** ولاستخدام **واحد**،
+   مربوط بالمستخدم والمناسبة (جدول `contact_import_tokens`).
+2. الموقع يفتح `shortcuts://run-shortcut?name=Dawaat%20%E2%80%93%20Contacts&input=text&text=TOKEN`.
+   إن لم تختفِ الصفحة خلال ثوانٍ (تطبيق الاختصارات لم يُفتح) يظهر زر «إضافة اختصار دعوات»
+   برابط iCloud المضبوط في الأدمن ← الميزات ← «رابط اختصار الآيفون» (`app_settings.ios_shortcut_url`).
+3. الاختصار: يختار جهات الاتصال (اختيار متعدد) ← يستخرج الاسم والأرقام ← يرسل JSON إلى
+   `POST https://dawaatly.top/api/contacts/import`:
+   `{ "token": "…", "contacts": [ { "name": "سعود", "phones": ["0501234567", "0112345678"] } ] }`
+4. الـ Worker يمرّر الطلب (بمفتاح anon العام) إلى دالة `import_contacts_with_token` التي
+   تتحقق: الرمز موجود، لم يُستخدم، لم ينتهِ، والمناسبة ما زالت لصاحبه — ثم توحّد الأرقام
+   (`normalize_sa_phone` ← `+9665XXXXXXXX`)، تفضّل الجوال السعودي على الثابت، تحذف المكرر
+   داخل الدفعة، وتُدخل المدعوين بـ `on conflict (event_id, phone) do nothing` (المدعو المسبق
+   يبقى بردّه)، وتستهلك الرمز وتسجّل الأعداد. الرد: `{ ok, event_id, inserted, duplicates, skipped, redirect, message }`.
+   أخطاء: `INVALID_TOKEN` 401، `TOKEN_USED` 409، `TOKEN_EXPIRED` 410، `EVENT_NOT_OWNED` 403،
+   `BAD_PAYLOAD` 400، `TOO_MANY_CONTACTS` 413 (>1000)، `NOT_CONFIGURED` 503.
+5. الصفحة تستطلع `contact_import_status(token)` كل ثانيتين (صاحب الرمز فقط)؛ عند استهلاكه
+   تُحدَّث قائمة المدعوين مباشرة بلا إعادة تحميل. الاختصار يفتح في النهاية `redirect`
+   (`/events/:id?imported=1`) فتتحدث القائمة أيضاً إن عاد المستخدم في تبويب جديد.
+
+اختبار الطبقة الكاملة لقاعدة البيانات في `src/supabase/tests/rls_tests.sql` (الاختبار 22:
+5 جهات ← 2 مُدخلة، 2 مكررة، 1 بلا رقم صالح؛ الاستخدام الثاني للرمز مرفوض).
+
+**بناء الاختصار (مرة واحدة على آيفون، ثم مشاركته برابط iCloud ولصقه في الأدمن):**
+
+افتح تطبيق الاختصارات ← «+» ← سمِّه بالضبط `Dawaat – Contacts` (شرطة طويلة – بين الكلمتين)،
+ثم أضف الإجراءات بهذا الترتيب:
+
+| # | الإجراء (بالعربية / English) | الضبط |
+|---|---|---|
+| 1 | تحديد جهة اتصال / **Select Contact** | فعّل «تحديد متعدد» (Select Multiple) |
+| 2 | تكرار مع كل / **Repeat with Each** | على نتيجة الخطوة 1 |
+| 3 | داخل التكرار: الحصول على تفاصيل جهات الاتصال / **Get Details of Contacts** | Get **Name** of Repeat Item |
+| 4 | داخل التكرار: **Get Details of Contacts** | Get **Phone Numbers** of Repeat Item |
+| 5 | داخل التكرار: قاموس / **Dictionary** | `name` = نتيجة 3 (نص)، `phones` = نتيجة 4 (مصفوفة) |
+| 6 | داخل التكرار: إضافة إلى المتغير / **Add to Variable** | المتغير `contacts` |
+| 7 | بعد التكرار: **Dictionary** | `token` = **Shortcut Input** (نص)، `contacts` = المتغير `contacts` (مصفوفة) |
+| 8 | الحصول على محتويات URL / **Get Contents of URL** | URL: `https://dawaatly.top/api/contacts/import` — Method: **POST** — Request Body: **JSON** — أدخل حقلي `token` و`contacts` من قاموس الخطوة 7 (أو اختر Request Body: File وضع القاموس كاملاً) |
+| 9 | الحصول على قيمة القاموس / **Get Dictionary Value** | المفتاح `redirect` من نتيجة 8 |
+| 10 | فتح عناوين URL / **Open URLs** | نتيجة 9 (يعيد المستخدم إلى المناسبة في سفاري) |
+
+اختياري بين 8 و9: **Get Dictionary Value** للمفتاح `message` ثم **Show Notification** لعرض
+«أُضيف N مدعو». أول تشغيل يطلب iOS السماح للاختصار بالوصول إلى جهات الاتصال وإلى
+`dawaatly.top` — اضغط «السماح دائماً».
+
+مشاركة الاختصار: من قائمة الاختصار ← مشاركة ← **نسخ رابط iCloud** ← الصقه في الأدمن ←
+الميزات ← «رابط اختصار الآيفون». المستخدمون الجدد يثبّتونه بزر «إضافة اختصار دعوات».
 
 ---
 
