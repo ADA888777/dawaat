@@ -1,7 +1,8 @@
-# بناء تطبيق دعوات (Capacitor) تلقائياً:
+# بناء تطبيق دعوات (Capacitor) تلقائياً — المنصتان تُولَّدان من الصفر بـ cap add
+# (مجلدا ios/ وandroid/ غير مرفوعين عمداً؛ الملحق والإعدادات هما المصدر):
 #   • أندرويد: APK تصحيحي موقّع بمفتاح debug — يُثبَّت مباشرة على أي جهاز أندرويد.
-#   • iOS: ‏App غير موقّع يُحزم كـ IPA — يوقَّع على جهازك بـ Sideloadly/Xcode بحساب Apple ID
-#     مجاني (التثبيت المباشر على آيفونك لا يحتاج حساب المطور المدفوع؛ المدفوع للنشر فقط).
+#   • iOS: ‏App غير موقّع يُحزم كـ IPA — يوقَّع على جهازك بـ Sideloadly (من ويندوز)
+#     أو Xcode (من ماك) بحساب Apple ID مجاني؛ حساب المطور المدفوع للنشر فقط.
 # الناتجان يُحمَّلان من تبويب Actions ← تشغيلة «Mobile apps» ← Artifacts.
 name: Mobile apps
 
@@ -17,6 +18,7 @@ jobs:
   android-apk:
     name: أندرويد — APK تصحيحي
     runs-on: ubuntu-latest
+    defaults: { run: { working-directory: mobile } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,11 +26,9 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - name: تثبيت حزم Capacitor
-        working-directory: mobile
         run: npm ci
-      - name: مزامنة مشروع أندرويد
-        working-directory: mobile
-        run: npx cap sync android
+      - name: توليد مشروع أندرويد (يربط ملحق جهات الاتصال تلقائياً)
+        run: npx cap add android
       - name: بناء APK
         working-directory: mobile/android
         run: |
@@ -43,16 +43,19 @@ jobs:
   ios-unsigned-ipa:
     name: iOS — IPA غير موقّع
     runs-on: macos-latest
+    defaults: { run: { working-directory: mobile } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: تثبيت حزم Capacitor
-        working-directory: mobile
         run: npm ci
-      - name: مزامنة مشروع iOS
-        working-directory: mobile
-        run: npx cap sync ios
+      - name: توليد مشروع iOS (يربط ملحق جهات الاتصال عبر SPM تلقائياً)
+        run: npx cap add ios
+      - name: إضافة الـ scheme المشترك (قالب Capacitor لا يولّده، وxcodebuild يحتاجه)
+        run: |
+          mkdir -p ios/App/App.xcodeproj/xcshareddata/xcschemes
+          cp ci/App.xcscheme ios/App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme
       - name: بناء التطبيق بلا توقيع
         working-directory: mobile/ios/App
         run: |
