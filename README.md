@@ -151,6 +151,17 @@ src/supabase/migrations/0011_contact_import_tokens.sql
 | iPhone Safari (ويب) | **اختصار Apple Shortcuts «Dawaat – Contacts»** (الطريق الأساسي — التفاصيل أدناه)؛ ثانوياً تعبئة تلقائية من جهات الاتصال (حقل اسم وجوال `autocomplete="name"/"tel"`) جهة في كل مرة | نعم عبر الاختصار. ملف VCF احتياطي فقط |
 | الكمبيوتر | VCF / CSV / لصق قائمة / إدخال يدوي | — |
 
+**تشخيص «لماذا لا تفتح جهات الاتصال؟» من الجهاز نفسه:** افتح صفحة المناسبة مع
+`?debug=contacts` في الرابط (مثل `dawaatly.top/events/12?debug=contacts`) ثم اضغط زر
+جهات الاتصال — تظهر أسفل النافذة لوحة سوداء فيها كل الحقائق: وجود `navigator.contacts`،
+نتيجة `getProperties`، سياق https، أعلى نافذة أم iframe، تفعيل المستخدم لحظة الاستدعاء
+(`userActivation`)، المتصفح المدمج إن وُجد، «وضع سطح المكتب»، واسم خطأ `select()` ورسالته.
+نفس التقرير يُطبع دائماً في Console. ملاحظات مثبتة: `select()` يُستدعى فوراً داخل إيماءة
+الضغط (أي await قبله يسبب SecurityError)، وWebView والمتصفحات المدمجة (واتساب/إنستغرام…)
+لا تملك الميزة أصلاً فيُعرض للعميل زر «فتح دعوات في Chrome» (رابط `intent://`)، و«موقع
+سطح المكتب» على تابلت أندرويد يُكشف ويُعامل كأندرويد مع إرشاد لتعطيله. Permissions-Policy
+وCSP في `_headers` لا يحكمان هذه الميزة، والـ Worker لا علاقة له بها (تعمل داخل المتصفح).
+
 الاكتشاف والتفرّع في `src/artifacts/invites/src/lib/contact-picker.ts`
 (`getContactPickerSupport().via`: `native` / `web-api` / `shortcut` / `autofill` / `none`)،
 والواجهة في `components/contact-import-dialog.tsx` و`components/ios-shortcut-import.tsx`.

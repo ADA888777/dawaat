@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookUser,
   CheckCheck,
+  Chrome,
   ClipboardPaste,
   Contact,
   ContactRound,
@@ -30,6 +31,9 @@ import {
 import {
   ContactImportError,
   contactFileAccept,
+  getContactPickerDiagnostics,
+  isNonChromeAndroidBrowser,
+  openInChromeUrl,
   contactPhoneKey,
   getContactPickerSupport,
   isValidContactPhone,
@@ -141,6 +145,20 @@ export function ContactImportDialog({
     contactFileAccept(support.platform) === undefined ? undefined : fallback;
 
   const [method, setMethod] = useState<Method | null>(null);
+  /** اسم خطأ المتصفح في آخر محاولة فتح (SecurityError…) — يقود مساعدة «فتح في Chrome» */
+  const [lastErrorName, setLastErrorName] = useState<string | null>(null);
+  /** ‎?debug=contacts‎ في الرابط: لوحة تشخيص كاملة داخل النافذة (للدعم، لا للعملاء) */
+  const debugContacts = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return (
+        window.location.search.includes("debug=contacts") ||
+        window.localStorage.getItem("dawaat.debug") === "1"
+      );
+    } catch {
+      return window.location.search.includes("debug=contacts");
+    }
+  }, []);
   const [staged, setStaged] = useState<StagedRow[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -227,6 +245,7 @@ export function ContactImportDialog({
     setFilter("");
     setDragging(false);
     setShowMore(false);
+    setLastErrorName(getContactPickerDiagnostics().lastAttempt?.errorName ?? null);
 
     if (rows.length > 0) {
       setNotice(deviceNotice(rows, mode));
@@ -307,11 +326,37 @@ export function ContactImportDialog({
           ? err.message
           : "تعذر فتح جهات الاتصال. استخدم استيراد ملف VCF أو CSV.",
       );
+      setLastErrorName(
+        err instanceof ContactImportError
+          ? (err.errorName ?? null)
+          : ((err as DOMException)?.name ?? null),
+      );
       setMethod(primaryMethod);
     } finally {
       setBusy(false);
     }
   };
+
+  /**
+   * أندرويد في متصفح مدمج أو متصفح لا يشغّل المنتقي: الحل الحقيقي للعميل هو
+   * Chrome نفسه، فنعرض زراً يفتح الصفحة الحالية هناك (intent://) بدل رسالة تقنية.
+   */
+  const showOpenInChrome =
+    support.platform === "android" &&
+    !support.isNativeApp &&
+    (support.inApp !== null || isNonChromeAndroidBrowser() || !support.supported);
+  const openInChromeButton = showOpenInChrome ? (
+    <Button
+      asChild
+      type="button"
+      className="h-auto w-full bg-ink py-3 text-base font-bold text-gold-light hover:bg-ink-soft"
+      data-testid="open-in-chrome"
+    >
+      <a href={openInChromeUrl()}>
+        <Chrome className="ml-2 h-5 w-5" /> فتح دعوات في Chrome
+      </a>
+    </Button>
+  ) : null;
 
   /**
    * سفاري على الآيفون: الحقلان يعبّئهما النظام من جهات الاتصال (جهة واحدة
@@ -585,12 +630,15 @@ export function ContactImportDialog({
               </p>
             </>
           ) : (
-            <div className="flex items-start gap-2 rounded-lg border border-line bg-cream-2 px-3 py-2">
-              <Info className="mt-0.5 h-4 w-4 shrink-0 text-gold-deep" />
-              <p className="text-xs leading-relaxed text-gray-700">
-                {support.reason ??
-                  "اختر إحدى الطرق التالية لإضافة المدعوين."}
-              </p>
+            <div className="space-y-2">
+              <div className="flex items-start gap-2 rounded-lg border border-line bg-cream-2 px-3 py-2">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-gold-deep" />
+                <p className="text-xs leading-relaxed text-gray-700">
+                  {support.reason ??
+                    "اختر إحدى الطرق التالية لإضافة المدعوين."}
+                </p>
+              </div>
+              {openInChromeButton}
             </div>
           )}
 
@@ -918,6 +966,41 @@ export function ContactImportDialog({
             className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm leading-relaxed text-emerald-700"
           >
             {notice}
+          </div>
+        )}
+        {support.supported &&
+          showOpenInChrome &&
+          lastErrorName !== null &&
+          lastErrorName !== "AbortError" &&
+          lastErrorName !== "NotAllowedError" && (
+            <div className="space-y-1">{openInChromeButton}</div>
+          )}
+
+        {debugContacts && (
+          <div className="space-y-1 rounded-lg border border-line bg-gray-900 p-2" data-testid="contacts-debug">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-gray-300">تشخيص جهات الاتصال (للدعم)</span>
+              <button
+                type="button"
+                className="text-[10px] text-gold underline"
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(
+                      JSON.stringify(
+                        { support, diagnostics: getContactPickerDiagnostics() },
+                        null,
+                        2,
+                      ),
+                    )
+                    .catch(() => undefined);
+                }}
+              >
+                نسخ
+              </button>
+            </div>
+            <pre dir="ltr" className="max-h-44 overflow-auto whitespace-pre-wrap break-all text-[10px] leading-relaxed text-emerald-200">
+              {JSON.stringify({ support, diagnostics: getContactPickerDiagnostics() }, null, 1)}
+            </pre>
           </div>
         )}
 
