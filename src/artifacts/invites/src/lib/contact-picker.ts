@@ -58,6 +58,8 @@ export interface ContactPickerSupport {
   via: ContactAccessVia;
   /** هل نعمل داخل تطبيق دعوات لا داخل متصفح؟ */
   isNativeApp: boolean;
+  /** اسم التطبيق إن كنا داخل متصفح مدمج (واتساب/إنستغرام/…)، وإلا null */
+  inApp: string | null;
 }
 
 /**
@@ -81,10 +83,13 @@ export type ContactImportErrorCode =
 
 export class ContactImportError extends Error {
   code: ContactImportErrorCode;
-  constructor(code: ContactImportErrorCode, message: string) {
+  /** اسم الخطأ الأصلي من المتصفح (SecurityError، NotAllowedError…) — للتشخيص */
+  errorName?: string;
+  constructor(code: ContactImportErrorCode, message: string, errorName?: string) {
     super(message);
     this.name = "ContactImportError";
     this.code = code;
+    this.errorName = errorName;
   }
 }
 
@@ -100,6 +105,144 @@ function getContactsManager(): ContactsManagerLike | null {
   if (typeof navigator === "undefined") return null;
   const nav = navigator as Navigator & { contacts?: ContactsManagerLike };
   return typeof nav.contacts?.select === "function" ? nav.contacts : null;
+}
+
+// ─────────── كشف المتصفح المدمج ووضع سطح المكتب + رابط فتح Chrome ───────────
+
+/**
+ * متصفح مدمج داخل تطبيق (واتساب/إنستغرام/فيسبوك/WebView…) — هذه لا تملك
+ * Contact Picker على أندرويد، والحل الصحيح فتح الموقع في Chrome لا رسالة تقنية.
+ */
+export function detectInAppBrowser(): string | null {
+  if (typeof navigator === "undefined") return null;
+  const ua = navigator.userAgent || "";
+  const tokens: Array<[RegExp, string]> = [
+    [/FBAN|FBAV|FB_IAB/, "فيسبوك"],
+    [/Instagram/, "إنستغرام"],
+    [/WhatsApp/, "واتساب"],
+    [/Telegram/, "تيليجرام"],
+    [/Snapchat/, "سناب شات"],
+    [/TikTok|musical_ly|Bytedance/i, "تيك توك"],
+    [/Twitter/, "X"],
+    [/Line\//, "لاين"],
+    [/MicroMessenger/, "وي شات"],
+    [/GSA\//, "تطبيق Google"],
+  ];
+  for (const [pattern, name] of tokens) if (pattern.test(ua)) return name;
+  // علامة WebView في أندرويد: «; wv)» داخل الـ UA
+  if (/Android/.test(ua) && /; ?wv\)/.test(ua)) return "متصفح مدمج";
+  return null;
+}
+
+/**
+ * «موقع سطح المكتب» مفعّل على جهاز أندرويد: الـ UA يدّعي لينكس/ويندوز بلا كلمة
+ * Android، لكن navigator.contacts لا توجد على أي كمبيوتر فعلي — وجودها يفضح المحرك.
+ */
+export function isDesktopModeAndroid(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return !/Android|iPhone|iPad|iPod/.test(ua) && getContactsManager() !== null;
+}
+
+/** متصفح أندرويد غير Chrome (سامسونج/هواوي/شاومي/أوبرا/فايرفوكس…) */
+export function isNonChromeAndroidBrowser(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /SamsungBrowser|HuaweiBrowser|HBPC|MiuiBrowser|HeyTapBrowser|VivoBrowser|UCBrowser|Silk\/|OPR\/|YaBrowser|Firefox|DuckDuckGo|Brave/i.test(ua);
+}
+
+/**
+ * رابط يفتح الصفحة الحالية في تطبيق Chrome على أندرويد (صيغة intent://)،
+ * مع العودة للرابط العادي إن لم يوجد Chrome.
+ */
+export function openInChromeUrl(href?: string): string {
+  const target =
+    href ?? (typeof location !== "undefined" ? location.href : "https://dawaatly.top");
+  try {
+    const u = new URL(target);
+    return (
+      "intent://" + u.host + u.pathname + u.search +
+      "#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" +
+      encodeURIComponent(target) + ";end"
+    );
+  } catch {
+    return target;
+  }
+}
+
+// ─────────────── تشخيص فتح جهات الاتصال (يظهر عبر ‎?debug=contacts‎) ───────────────
+
+/** صورة كاملة عن البيئة وآخر محاولة فتح — تجيب «لماذا لا تفتح؟» من الجهاز الحقيقي */
+export interface ContactPickerDiagnostics {
+  at: string;
+  ua: string;
+  uaDataBrands: string | null;
+  uaDataMobile: boolean | null;
+  uaDataPlatform: string | null;
+  secureContext: boolean;
+  topLevel: boolean;
+  hasContactsApi: boolean;
+  hasSelect: boolean;
+  getProperties: string | null;
+  userActivationActive: boolean | null;
+  userActivationHasBeen: boolean | null;
+  inAppBrowser: string | null;
+  desktopModeSuspected: boolean;
+  platformDetected: ContactPlatform;
+  lastAttempt: {
+    properties: string;
+    errorName: string | null;
+    errorMessage: string | null;
+    picked: number | null;
+  } | null;
+}
+
+let lastDiagnostics: ContactPickerDiagnostics | null = null;
+
+/** آخر تشخيص (أو تشخيص البيئة الحالية إن لم تحدث محاولة بعد) */
+export function getContactPickerDiagnostics(): ContactPickerDiagnostics {
+  return lastDiagnostics ?? buildEnvDiagnostics();
+}
+
+interface NavigatorUAData {
+  brands?: Array<{ brand: string; version: string }>;
+  mobile?: boolean;
+  platform?: string;
+}
+
+function buildEnvDiagnostics(): ContactPickerDiagnostics {
+  const nav = typeof navigator === "undefined" ? undefined : navigator;
+  const uaData = (nav as (Navigator & { userAgentData?: NavigatorUAData }) | undefined)
+    ?.userAgentData;
+  const activation = (
+    nav as (Navigator & { userActivation?: { isActive?: boolean; hasBeenActive?: boolean } }) | undefined
+  )?.userActivation;
+  let topLevel = true;
+  try {
+    topLevel = typeof window === "undefined" || window.top === window.self;
+  } catch {
+    topLevel = false;
+  }
+  return {
+    at: new Date().toISOString(),
+    ua: nav?.userAgent ?? "",
+    uaDataBrands: uaData?.brands?.map((b) => b.brand + " " + b.version).join(", ") ?? null,
+    uaDataMobile: typeof uaData?.mobile === "boolean" ? uaData.mobile : null,
+    uaDataPlatform: uaData?.platform ?? null,
+    secureContext:
+      typeof window !== "undefined" && (window.isSecureContext ?? location.protocol === "https:"),
+    topLevel,
+    hasContactsApi: !!(nav as (Navigator & { contacts?: unknown }) | undefined)?.contacts,
+    hasSelect: getContactsManager() !== null,
+    getProperties: null,
+    userActivationActive: typeof activation?.isActive === "boolean" ? activation.isActive : null,
+    userActivationHasBeen:
+      typeof activation?.hasBeenActive === "boolean" ? activation.hasBeenActive : null,
+    inAppBrowser: detectInAppBrowser(),
+    desktopModeSuspected: isDesktopModeAndroid(),
+    platformDetected: detectPlatform(),
+    lastAttempt: null,
+  };
 }
 
 // ─────────────── جسر تطبيق دعوات (Capacitor — مجلد mobile/) ───────────────
@@ -193,6 +336,9 @@ export function detectPlatform(): ContactPlatform {
     /Macintosh/.test(ua) && (navigator.maxTouchPoints ?? 0) > 1;
   if (/iPhone|iPad|iPod/.test(ua) || isIpadOS) return "ios";
   if (/Android/.test(ua)) return "android";
+  // «موقع سطح المكتب» مفعّل على تابلت أندرويد: الـ UA بلا Android لكن
+  // navigator.contacts (غير موجودة على أي كمبيوتر) تكشف المحرك الحقيقي
+  if (getContactsManager() !== null) return "android";
   if (/Windows|Macintosh|Linux|CrOS/.test(ua)) return "desktop";
   return "unknown";
 }
@@ -204,15 +350,16 @@ export function detectPlatform(): ContactPlatform {
 export function getContactPickerSupport(): ContactPickerSupport {
   const platform = detectPlatform();
   const nativeApp = isNativeApp();
+  const inApp = typeof navigator === "undefined" ? null : detectInAppBrowser();
 
   if (typeof window === "undefined") {
-    return { supported: false, reason: null, platform, via: "none", isNativeApp: false };
+    return { supported: false, reason: null, platform, via: "none", isNativeApp: false, inApp: null };
   }
 
   // ① تطبيق دعوات: الملحق الأصلي أولاً — لا يعتمد على قدرات WebView
   if (nativeApp) {
     if (getNativeContactPicker()) {
-      return { supported: true, reason: null, platform, via: "native", isNativeApp: true };
+      return { supported: true, reason: null, platform, via: "native", isNativeApp: true, inApp };
     }
     // نسخة قديمة من التطبيق بلا الملحق: نكمل بفحص قدرات الـ WebView كالمتصفح
   }
@@ -224,6 +371,7 @@ export function getContactPickerSupport(): ContactPickerSupport {
       platform,
       via: "none",
       isNativeApp: nativeApp,
+      inApp,
       reason:
         "الوصول لجهات الاتصال يحتاج اتصالاً آمناً (https). استخدم أحد البدائل بالأسفل.",
     };
@@ -241,14 +389,15 @@ export function getContactPickerSupport(): ContactPickerSupport {
       platform,
       via: "none",
       isNativeApp: nativeApp,
+      inApp,
       reason:
         "لا يمكن فتح جهات الاتصال داخل نافذة مدمجة. افتح الموقع في المتصفح مباشرة، أو استخدم أحد البدائل بالأسفل.",
     };
   }
 
-  // ② أندرويد Chrome/Edge: Contact Picker API
+  // ② أندرويد Chrome/Edge/Samsung: Contact Picker API
   if (getContactsManager()) {
-    return { supported: true, reason: null, platform, via: "web-api", isNativeApp: nativeApp };
+    return { supported: true, reason: null, platform, via: "web-api", isNativeApp: nativeApp, inApp };
   }
 
   // ③ سفاري على الآيفون: اختصار «Dawaat – Contacts» هو الطريق الأساسي (اختيار
@@ -261,15 +410,32 @@ export function getContactPickerSupport(): ContactPickerSupport {
       platform,
       via: "shortcut",
       isNativeApp: nativeApp,
+      inApp,
       reason: null,
+    };
+  }
+
+  // ④ أندرويد داخل متصفح مدمج (واتساب/إنستغرام/WebView): الميزة موجودة في
+  //    Chrome — الحل زر «فتح في Chrome»، والواجهة تتكفل بعرضه من inApp
+  if (platform === "android" && inApp) {
+    return {
+      supported: false,
+      platform,
+      via: "none",
+      isNativeApp: nativeApp,
+      inApp,
+      reason:
+        "أنت تتصفح دعوات داخل " + inApp + " ولا يمكنه فتح جهات الاتصال — افتح الموقع في Chrome وستعمل مباشرة.",
     };
   }
 
   const reason =
     platform === "desktop"
-      ? "متصفحات الكمبيوتر لا تدعم الوصول لجهات الاتصال. استورد ملف CSV أو ‎.vcf‎، أو الصق القائمة، أو أضف الرقم يدوياً."
-      : "متصفحك لا يدعم فتح جهات الاتصال. استخدم أحد البدائل بالأسفل.";
-  return { supported: false, platform, via: "none", isNativeApp: nativeApp, reason };
+      ? "على الكمبيوتر: استورد ملف CSV أو ‎.vcf‎، أو الصق القائمة، أو أضف الاسم والرقم يدوياً."
+      : platform === "android"
+        ? "هذا المتصفح لا يتيح اختيار جهات الاتصال — افتح الموقع في Chrome وستعمل مباشرة، أو استخدم أحد البدائل بالأسفل."
+        : "متصفحك لا يتيح فتح جهات الاتصال. استخدم أحد البدائل بالأسفل.";
+  return { supported: false, platform, via: "none", isNativeApp: nativeApp, inApp, reason };
 }
 
 /** يبقى للتوافق مع الاستدعاءات القديمة */
@@ -453,9 +619,20 @@ export async function pickContacts(): Promise<PickedContact[]> {
   return (await openDeviceContacts()).contacts;
 }
 
-/** Contact Picker API — أندرويد Chrome/Edge */
+/**
+ * Contact Picker API — أندرويد Chrome/Edge/Samsung.
+ *
+ * القاعدة الحاسمة: select() تُستدعى فوراً داخل إيماءة الضغط نفسها. أي await
+ * قبلها (كان هنا getProperties) قد يستهلك تفعيل المستخدم فيرفض المتصفح
+ * بـ SecurityError رغم أن كل شيء آخر سليم. getProperties تعمل الآن بالتوازي
+ * للتشخيص فقط ولا تؤخر الفتح، وكل محاولة تسجّل تشخيصاً كاملاً
+ * (getContactPickerDiagnostics + console) يظهر في النافذة مع ‎?debug=contacts‎.
+ */
 async function pickContactsWebApi(): Promise<PickedContact[]> {
   const manager = getContactsManager();
+  const diag = buildEnvDiagnostics();
+  lastDiagnostics = diag;
+
   if (!manager) {
     throw new ContactImportError(
       "unsupported",
@@ -463,50 +640,88 @@ async function pickContactsWebApi(): Promise<PickedContact[]> {
     );
   }
 
-  // بعض الإصدارات ترفض الطلب كله إذا ذُكرت خاصية لا تدعمها
-  let properties = ["name", "tel"];
+  // للتشخيص فقط — لا ننتظرها قبل select حتى لا نخسر إيماءة المستخدم
   if (typeof manager.getProperties === "function") {
-    try {
-      const available = await manager.getProperties();
-      if (Array.isArray(available) && available.length > 0) {
-        if (!available.includes("tel")) {
-          throw new ContactImportError(
-            "unsupported",
-            "جهازك لا يسمح بقراءة أرقام الجوال من جهات الاتصال. استخدم أحد البدائل بالأسفل.",
-          );
-        }
-        properties = properties.filter((p) => available.includes(p));
-      }
-    } catch (err) {
-      if (err instanceof ContactImportError) throw err;
-      // فشل استعلام الخصائص لا يمنع المحاولة بالخصائص الافتراضية
-    }
+    manager.getProperties().then(
+      (props) => {
+        diag.getProperties = Array.isArray(props) ? props.join(",") : String(props);
+      },
+      (err) => {
+        diag.getProperties = "خطأ: " + String((err as Error)?.message ?? err);
+      },
+    );
   }
+
+  const trySelect = (properties: string[]) => {
+    diag.lastAttempt = {
+      properties: properties.join(","),
+      errorName: null,
+      errorMessage: null,
+      picked: null,
+    };
+    return manager.select(properties, { multiple: true });
+  };
 
   let selected: Array<{ name?: string[]; tel?: string[] }>;
   try {
-    selected = await manager.select(properties, { multiple: true });
+    try {
+      selected = await trySelect(["name", "tel"]);
+    } catch (first) {
+      // بعض الإصدارات ترفض الطلب كله لخاصية لا تدعمها: أعد المحاولة بالأرقام فقط
+      if (first instanceof TypeError || (first as DOMException)?.name === "TypeError") {
+        selected = await trySelect(["tel"]);
+      } else {
+        throw first;
+      }
+    }
   } catch (err) {
-    const name = (err as DOMException)?.name;
+    const name =
+      (err as DOMException)?.name ?? (err as Error)?.constructor?.name ?? "Error";
+    const message = String((err as Error)?.message ?? err ?? "");
+    if (diag.lastAttempt) {
+      diag.lastAttempt.errorName = name;
+      diag.lastAttempt.errorMessage = message;
+    }
+    console.info("[دعوات] تشخيص جهات الاتصال:", JSON.stringify(diag, null, 2));
+
     // الإلغاء نتيجة طبيعية لا خطأ
     if (name === "AbortError") return [];
     if (name === "NotAllowedError") {
       throw new ContactImportError(
         "denied",
-        "تم رفض إذن الوصول لجهات الاتصال. اسمح به من إعدادات المتصفح، أو استخدم أحد البدائل بالأسفل.",
+        "تم رفض إذن الوصول لجهات الاتصال. اسمح به من إعدادات المتصفح ثم أعد المحاولة.",
+        name,
       );
     }
-    if (name === "SecurityError" || name === "InvalidStateError") {
+    if (name === "InvalidStateError") {
+      throw new ContactImportError(
+        "failed",
+        "نافذة جهات الاتصال مفتوحة بالفعل — أغلقها ثم اضغط الزر مرة أخرى.",
+        name,
+      );
+    }
+    if (name === "SecurityError") {
       throw new ContactImportError(
         "insecure",
-        "المتصفح منع فتح جهات الاتصال في هذا السياق. افتح الموقع في نافذة عادية، أو استخدم أحد البدائل بالأسفل.",
+        diag.inAppBrowser
+          ? "هذا المتصفح المدمج لا يسمح بفتح جهات الاتصال — افتح دعوات في Chrome وستعمل مباشرة."
+          : diag.desktopModeSuspected
+            ? "المتصفح في «وضع سطح المكتب». عطّله من قائمة المتصفح (⋮ ← موقع سطح المكتب) ثم اضغط الزر مرة أخرى."
+            : "لم يسمح المتصفح بفتح جهات الاتصال هذه المرة — اضغط الزر مرة أخرى، وإن تكرر افتح الموقع في Chrome.",
+        name,
       );
     }
     throw new ContactImportError(
       "failed",
-      "تعذر فتح جهات الاتصال. استخدم أحد البدائل بالأسفل.",
+      "تعذر فتح جهات الاتصال في هذا المتصفح — جرّب فتحه في Chrome أو استخدم أحد البدائل.",
+      name,
     );
   }
+
+  if (diag.lastAttempt) {
+    diag.lastAttempt.picked = Array.isArray(selected) ? selected.length : 0;
+  }
+  console.info("[دعوات] تشخيص جهات الاتصال:", JSON.stringify(diag, null, 2));
 
   if (!Array.isArray(selected) || selected.length === 0) return [];
 
