@@ -20,7 +20,11 @@
     "directory": "./src/artifacts/invites/dist/public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "html_handling": "none"
+    "html_handling": "none",
+    // حاسم: طلب التنقل (مثل عودة العميل من بوابة الدفع إلى /api/pay/return)
+    // كانت طبقة الأصول تبتلعه وتعيد index.html قبل أن يصل الـ Worker إطلاقاً،
+    // فلا يتم تأكيد الدفع. هذا يجعل الـ Worker يسبق الأصول في مسارات /api وحدها.
+    "run_worker_first": ["/api/*"]
   },
   // معاينات الفروع (Worker Previews): يبني Cloudflare كل فرع/PR بأمر «npx wrangler preview»
   // الذي يرفض العمل بلا هذه الكتلة. فارغة لأن المعاينة تستخدم الإعدادات العليا نفسها

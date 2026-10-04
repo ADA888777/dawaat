@@ -12,6 +12,7 @@ dawaat/
 ├── src/                       ← شيفرة المشروع الكاملة (pnpm workspace)
 │   ├── artifacts/invites/     ← تطبيق دعوات (React + Vite + Supabase)
 │   └── supabase/              ← المخطط والهجرات واختبارات RLS
+├── worker/                    ← Worker: جهات الاتصال + بوابة الدفع (المفاتيح السرية هنا)
 ├── mobile/                    ← تطبيق iOS/Android (Capacitor) + ملحق جهات الاتصال الأصلي
 ├── .github/workflows/ci.yml   ← فحص الأنواع والبناء واختبارات أمان قاعدة البيانات
 ├── wrangler.jsonc             ← إعداد النشر على Cloudflare Workers
@@ -28,10 +29,16 @@ dawaat/
 يقرأ `wrangler.jsonc` في الجذر، فيبني التطبيق من `src/` ثم ينشر الناتج
 (`src/artifacts/invites/dist/public`) مع Worker صغير (`worker/index.ts`). أي دفع إلى `main` = نشر جديد.
 
-الـ Worker يخدم مسارين فقط ويترك كل ما عداهما للأصول الثابتة كما كان:
+الـ Worker يخدم مسارات `/api/*` وحدها ويترك كل ما عداها للأصول الثابتة كما كان:
 `POST /api/contacts/import` (استقبال جهات الاتصال من اختصار الآيفون — انظر قسم
-جهات الاتصال) و`GET /api/health`. المسارات الداخلية للتطبيق (`/events/12` …) تُعاد لها
-`index.html` (سلوك SPA) كما في السابق.
+جهات الاتصال)، ومسارات بوابة الدفع الثلاثة `POST /api/pay/create` و
+`GET /api/pay/return` و`POST /api/pay/webhook` (انظر قسم بوابة الدفع)، و`GET /api/health`.
+المسارات الداخلية للتطبيق (`/events/12` …) تُعاد لها `index.html` (سلوك SPA) كما في السابق.
+
+`wrangler.jsonc` يضبط `"run_worker_first": ["/api/*"]`. هذا **حاسم**: طلب التنقّل
+(`Sec-Fetch-Mode: navigate`) — مثل عودة العميل من صفحة بيلينك إلى `/api/pay/return` —
+كانت طبقة الأصول تبتلعه وتعيد `index.html` بسلوك `not_found_handling` قبل أن يصل
+الـ Worker إطلاقاً، فلا يُؤكَّد الدفع أبداً. القاعدة محدودة بـ `/api/*` فلا تتأثر بقية الأصول.
 
 لا يحتاج الـ Worker أي متغير تشغيل: البناء يكتب `runtime-config.json` بجانب الحزمة
 (العنوان ومفتاح **anon public** نفسه المضمّن أصلاً في حزمة JavaScript لكل زائر — وليس
@@ -95,8 +102,63 @@ src/supabase/migrations/0011_contact_import_tokens.sql
   ما لم توجد عملية `paid` للمناسبة (جدول `event_payments`: المستخدم، المناسبة،
   المبلغ، الحالة، وقت الدفع، رقم العملية، حالة الإرسال). الإثباتات في bucket خاص
   `payment-proofs` تُعرض بروابط موقّتة للمالك والأدمن فقط.
-- بوابة الدفع الإلكترونية غير مربوطة بعد؛ الأعمدة `method`/`provider`/`provider_ref`
-  محجوزة لربطها لاحقاً بنفس التدفق والحالات دون تغيير الواجهة.
+- بوابة الدفع الإلكترونية (بيلينك) مربوطة عبر الأعمدة `method`/`provider`/`provider_ref`
+  بنفس التدفق والحالات — انظر القسم التالي. التحويل البنكي يبقى كما هو بالتوازي.
+
+### بوابة الدفع «بيلينك» — الهجرة 0012
+
+الدفع بالبطاقة (مدى/فيزا/ماستركارد/Apple Pay) بالتوازي مع التحويل البنكي، على نفس
+جدول `event_payments` ونفس الحالات، فلا تتغير لوحة المدفوعات ولا شرط فتح الإرسال.
+
+**التدفق**
+
+1. العميل يضغط «ادفع بالبطاقة» في شاشة الدفع ← الموقع ينادي `POST /api/pay/create`
+   بجلسة المستخدم (`Authorization: Bearer <jwt>`).
+2. الـ Worker ينشئ/يجلب العملية بجلسة المستخدم عبر `request_event_payment`، ثم ينشئ
+   فاتورة في بيلينك (`/api/addInvoice`) ويربط `transactionNo` بالعملية عبر
+   `attach_gateway_payment`، ويعيد رابط صفحة الدفع. الحد الأدنى لمبلغ الفاتورة في
+   بيلينك **٥ ريالات**؛ أقل من ذلك يُرد بـ `AMOUNT_TOO_SMALL`.
+3. بعد الدفع يعود العميل إلى `GET /api/pay/return` (ثم يُحوَّل إلى
+   `/events/<id>?payment=paid|pending`)، ويستدعي بيلينك `POST /api/pay/webhook`
+   خادماً لخادم.
+4. في الحالتين **يتحقق الـ Worker من بيلينك مباشرة** (`/api/getInvoice/{transactionNo}`)
+   ثم ينادي `confirm_gateway_payment` بالمبلغ الحقيقي.
+
+**الأمان**
+
+- مفاتيح بيلينك لا تخرج من الـ Worker: الواجهة لا تعرف منها شيئاً.
+- لا يملك المتصفح ولا حمولة الـ webhook صلاحية تعليم عملية كـ«مدفوعة»:
+  `confirm_gateway_payment` تتطلب سراً مشتركاً مخزّناً في `app_private.gateway_config`
+  (لا صلاحية لـ `anon`/`authenticated` عليه ولا تعيده أي دالة)، فلا يكفي مفتاح
+  anon العام وحده. حالة الفاتورة ومبلغها يُقرآن من بيلينك لا من الطلب الوارد.
+- تطابق المبلغ مفروض في SQL (`AMOUNT_MISMATCH` إن قل عن المطلوب)، والتأكيد
+  **idempotent** فإعادة إرسال الـ webhook (حتى ١٠ مرات) لا تكرر شيئاً.
+- `/api/pay/webhook` يرد 503 عند فشل التحقق ليعيد بيلينك المحاولة، و200 عند النجاح.
+- لا يوجد أي مفتاح `service_role` في أي مكان.
+
+**خطوات التشغيل (مرة واحدة)**
+
+1. **Supabase ← SQL Editor:** نفّذ `src/supabase/migrations/0012_paylink_gateway.sql`.
+2. وَلّد سراً مشتركاً عشوائياً (٣٢ حرفاً على الأقل)، مثلاً:
+   `openssl rand -hex 32`.
+3. **Cloudflare ← Workers ← dawaat ← Settings ← Variables and Secrets** — أضفها
+   كـ **Secret** (وليس Text):
+
+   | المتغير | القيمة |
+   |---|---|
+   | `PAYLINK_API_ID` | API ID من `my.paylink.sa/private/api-keys` |
+   | `PAYLINK_SECRET_KEY` | Secret Key من نفس الصفحة |
+   | `GATEWAY_SHARED_SECRET` | السر المشترك المولَّد في الخطوة ٢ |
+   | `PAYLINK_BASE` | اختياري — `https://restpilot.paylink.sa` للتجربة؛ الافتراضي الإنتاج |
+
+4. **Supabase ← SQL Editor** بحساب أدمن: `select public.set_gateway_secret('<نفس السر>');`
+   (ترفض أقل من ٢٤ حرفاً، ولا تنفّذها إلا من حساب أدمن.)
+5. **بيلينك ← الإعدادات ← Payment Webhook URL:** `https://dawaatly.top/api/pay/webhook`
+6. **الموقع ← الإعدادات ← رسوم إرسال الدعوات:** فعّل «الدفع بالبطاقة (بوابة بيلينك)».
+
+إن غاب `PAYLINK_API_ID`/`PAYLINK_SECRET_KEY` يرد `/api/pay/create` بـ 503
+`NOT_CONFIGURED`، وإن غاب `GATEWAY_SHARED_SECRET` لا يُؤكَّد أي دفع (يبقى `pending`)
+بدل أن يُعلَّم مدفوعاً بغير تحقق.
 
 ### شريط الإعلانات — الهجرات 0007 و0009 و0010
 
