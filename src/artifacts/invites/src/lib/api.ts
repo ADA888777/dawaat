@@ -532,6 +532,49 @@ export function iosShortcutRunUrl(token: string): string {
   );
 }
 
+/**
+ * الدفع بالبطاقة عبر بوابة «بيلينك».
+ *
+ * المتصفح لا يلمس أي مفتاح: ينادي Worker دعوات بجلسة المستخدم فقط، والـ Worker
+ * (خادم) ينشئ الفاتورة بمفاتيحه السرية ويعيد رابط صفحة الدفع. تأكيد الدفع يتم
+ * خادماً لخادم بعد التحقق من بيلينك مباشرة — لا من المتصفح.
+ */
+export interface GatewayCheckout {
+  ok: boolean;
+  url?: string;
+  paymentId?: number;
+  alreadyPaid?: boolean;
+  amount?: number;
+}
+
+export function useStartGatewayPayment() {
+  return useMutation({
+    mutationFn: async (vars: {
+      eventId: number;
+      clientName?: string;
+      clientMobile?: string;
+      clientEmail?: string;
+    }): Promise<GatewayCheckout> => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("سجّل الدخول أولاً ثم أعد المحاولة.");
+
+      const res = await fetch("/api/pay/create", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer " + token },
+        body: JSON.stringify(vars),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | (GatewayCheckout & { message?: string })
+        | null;
+      if (!res.ok || !body?.ok) {
+        throw new Error(body?.message ?? "تعذر فتح صفحة الدفع. حاول مرة أخرى.");
+      }
+      return body;
+    },
+  });
+}
+
 export interface ContactImportToken {
   token: string;
   expiresAt: string;
@@ -1119,6 +1162,8 @@ export interface AppSettings {
   featureFlags: FeatureFlags;
   /** رابط iCloud لاختصار «Dawaat – Contacts» على الآيفون؛ فارغ = يُعرض شرح التثبيت فقط */
   iosShortcutUrl: string;
+  paymentGatewayEnabled: boolean;
+  paymentGatewayName: string;
 }
 
 export type FeatureKey =
@@ -1199,6 +1244,8 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   announcementInterval: "announcement_interval",
   featureFlags: "feature_flags",
   iosShortcutUrl: "ios_shortcut_url",
+  paymentGatewayEnabled: "payment_gateway_enabled",
+  paymentGatewayName: "payment_gateway_name",
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -1234,6 +1281,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   announcementInterval: 5,
   featureFlags: { ...FEATURE_DEFAULTS },
   iosShortcutUrl: "",
+  paymentGatewayEnabled: false,
+  paymentGatewayName: "بيلينك",
 };
 
 export const getGetAppSettingsQueryKey = () => ["app-settings"] as const;
