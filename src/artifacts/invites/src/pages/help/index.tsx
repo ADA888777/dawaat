@@ -34,17 +34,18 @@ const steps = [
   },
 ];
 
-const buildFaqs = (freeLimit: number) => [
+const buildFaqs = () => [
   {
     q: "هل يحتاج ضيوفي إلى حساب لتأكيد الحضور؟",
     a: "لا. صفحة الدعوة عامة، ويكفي أن يفتح الضيف الرابط ويدخل اسمه ورقم جواله لتأكيد حضوره أو اعتذاره.",
   },
   {
     q: "كم عدد المناسبات التي يمكنني إنشاؤها؟",
-    a:
-"الباقة المجانية تتيح إنشاء " +
-(freeLimit === 1 ? "مناسبة واحدة" : freeLimit + " مناسبات") +
-". للترقية إلى الباقة الماسية (مناسبات غير محدودة) توجّه إلى صفحة الباقة من لوحة التحكم.",
+    a: "غير محدود. لا توجد باقات ولا اشتراك شهري — أنشئ ما تشاء من المناسبات مجاناً، وتدفع فقط عند إرسال دعوات كل مناسبة.",
+  },
+  {
+    q: "كيف تُحسب الرسوم؟",
+    a: "بحسب ما تستخدمه في المناسبة: سعر أساسي للإنشاء والإرسال، ويُضاف إليه مبلغ صغير إن أضفت صورة غلاف، ومبلغ آخر إن أضفت تسجيلاً صوتياً. المبلغ النهائي يظهر مفصّلاً أمامك قبل الدفع.",
   },
   {
     q: "هل يمكنني تعديل الدعوة بعد إرسال الرابط؟",
@@ -73,7 +74,7 @@ export default function HelpPage() {
   const { data: appSettings } = useGetAppSettings();
   
   // بيانات الدعم وحد الباقة المجانية يحرّرهما الأدمن من صفحة الإعدادات
-  const faqs = buildFaqs(appSettings?.freeEventsLimit ?? 1);
+  const faqs = buildFaqs();
   const supportEmail = (appSettings?.supportEmail ?? "").trim();
   const supportPhone = (appSettings?.supportPhone ?? "").trim();
   const whatsapp = (appSettings?.supportWhatsapp || appSettings?.supportPhone || "").replace(/\D/g, "");
