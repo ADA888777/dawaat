@@ -662,6 +662,93 @@ begin
   reset role;
   raise notice '✅ 22: استيراد جهات الاتصال بالرمز — ملكية، توحيد، تفضيل الجوال، منع التكرار، استهلاك الرمز';
 
+  -- ═══════════ 23) بوابة الدفع (بيلينك): السر المشترك يحمي تأكيد الدفع ═══════════
+  reset role;
+  -- رسوم إرسال فعلية حتى لا تُنشأ العملية مجانية
+  update public.app_settings set send_fee_amount = 25 where id = true;
+  -- الأدمن يضبط السر المشترك
+  perform set_config('request.jwt.claim.sub','33333333-3333-3333-3333-333333333333', true);
+  set local role authenticated;
+  perform public.set_gateway_secret('shared-secret-for-tests-0123456789');
+
+  -- مناسبة جديدة لأليس خاصة بهذا الاختبار (مناسبتها الأولى لها عملية دفع سابقة)
+  reset role;
+  insert into public.events (user_id, title, category, event_date, location)
+  values ('11111111-1111-1111-1111-111111111111','زفاف أليس — اختبار البوابة','wedding',
+          now()+interval '20 days','الرياض')
+  returning id into v_event;
+
+  -- أليس تطلب الدفع لمناسبتها ثم تربط فاتورة البوابة
+  perform set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', true);
+  set local role authenticated;
+  select (public.request_event_payment(v_event)).id into v_cnt;
+  if v_cnt is null then raise exception 'فشل 23أ: لم تُنشأ عملية دفع'; end if;
+  perform public.attach_gateway_payment(v_cnt, 'paylink', 'TXN-TEST-1');
+
+  -- بوب لا يربط فاتورة بعملية أليس
+  perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
+  begin
+    perform public.attach_gateway_payment(v_cnt, 'paylink', 'TXN-HACK');
+    raise exception 'فشل 23ب: بوب ربط فاتورة بعملية غيره!';
+  exception when others then
+    if sqlerrm like 'فشل 23%' then raise; end if;
+    if sqlerrm <> 'PAYMENT_NOT_FOUND' then raise exception 'فشل 23ب: خطأ غير متوقع %', sqlerrm; end if;
+  end;
+
+  -- الإرسال ما زال مقفلاً قبل التأكيد
+  reset role;
+  if public.event_sending_unlocked(v_event) then
+    raise exception 'فشل 23ج: الإرسال انفتح قبل تأكيد الدفع!';
+  end if;
+
+  -- سر خاطئ مرفوض
+  set local role anon;
+  perform set_config('request.jwt.claim.sub','', true);
+  begin
+    perform public.confirm_gateway_payment('wrong-secret-wrong-secret-xx', 'TXN-TEST-1', 25);
+    raise exception 'فشل 23د: قُبل سر خاطئ!';
+  exception when others then
+    if sqlerrm like 'فشل 23%' then raise; end if;
+    if sqlerrm <> 'BAD_GATEWAY_SECRET' then raise exception 'فشل 23د: خطأ غير متوقع %', sqlerrm; end if;
+  end;
+
+  -- مبلغ أقل من المطلوب مرفوض
+  begin
+    perform public.confirm_gateway_payment('shared-secret-for-tests-0123456789', 'TXN-TEST-1', 5);
+    raise exception 'فشل 23هـ: قُبل مبلغ أقل من المطلوب!';
+  exception when others then
+    if sqlerrm like 'فشل 23%' then raise; end if;
+    if sqlerrm <> 'AMOUNT_MISMATCH' then raise exception 'فشل 23هـ: خطأ غير متوقع %', sqlerrm; end if;
+  end;
+
+  -- السر الصحيح والمبلغ الصحيح: يُعلَّم مدفوعاً وينفتح الإرسال
+  select (public.confirm_gateway_payment('shared-secret-for-tests-0123456789', 'TXN-TEST-1', 25))->>'status'
+    into v_slug;
+  if v_slug <> 'paid' then raise exception 'فشل 23و: الحالة % بدل paid', v_slug; end if;
+
+  -- تكرار الـ webhook لا يغيّر شيئاً (يُعاد إرساله حتى 10 مرات)
+  select (public.confirm_gateway_payment('shared-secret-for-tests-0123456789', 'TXN-TEST-1', 25))->>'already'
+    into v_slug2;
+  if v_slug2 <> 'true' then raise exception 'فشل 23ز: لم يُكتشف التأكيد المكرر'; end if;
+
+  reset role;
+  if not public.event_sending_unlocked(v_event) then
+    raise exception 'فشل 23ح: الإرسال لم ينفتح بعد تأكيد الدفع!';
+  end if;
+
+  -- anon لا يقرأ السر ولا جدول الإعدادات الخاص
+  set local role anon;
+  begin
+    perform 1 from app_private.gateway_config;
+    raise exception 'فشل 23ط: anon قرأ جدول الأسرار!';
+  exception when others then
+    if sqlerrm like 'فشل 23%' then raise; end if;
+  end;
+
+  reset role;
+  update public.app_settings set send_fee_amount = 0 where id = true;
+  raise notice '✅ 23: بوابة الدفع — السر المشترك، تطابق المبلغ، منع تكرار الـ webhook، فتح الإرسال بعد الدفع';
+
   raise notice '';
   raise notice '════════════════════════════════';
   raise notice '  نجحت جميع اختبارات RLS ✅';
