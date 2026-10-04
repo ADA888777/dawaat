@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Link, useLocation, useParams } from "wouter";
-import { useCreateEvent, useUpdateEvent, useGetEvent, useListTemplates, useGetMe, getGetEventQueryKey, normalizePhone, isValidPhone } from "@/lib/api";
+import { useCreateEvent, useUpdateEvent, useGetEvent, useListTemplates, useGetMe, getGetEventQueryKey, normalizePhone, isValidPhone, useGetAppSettings } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -276,21 +276,9 @@ export default function EventForm() {
         { data: payload },
         {
           onSuccess: (res) => setLocation(`/events/${res.id}`),
+          // أُلغيت الباقات في 0013 — لم يعد هناك حد لعدد المناسبات
           onError: (err) => {
-            const msg = err instanceof Error ? err.message : "حدث خطأ غير متوقع";
-            // [ع-5] قاعدة البيانات ترسل EVENTS_LIMIT_REACHED:<الحد>،
-            // فتُبنى الرسالة بالحد الفعلي بدل نص ثابت كان يقول "دعوة واحدة"
-            // بينما الحد الحقيقي ثلاث دعوات.
-            const limitMatch = msg.match(/EVENTS_LIMIT_REACHED:(\d+)/);
-            if (limitMatch) {
-              const limit = Number(limitMatch[1]) || me?.eventsLimit || 1;
-              setSubmitError(
-                `لقد وصلت إلى الحد الأقصى لباقتك الحالية (${limit} ${limit === 1 ? "دعوة" : "دعوات"}). ` +
-                `احذف إحدى دعواتك لإنشاء دعوة جديدة، أو قم بالترقية إلى الباقة الماسية.`
-              );
-            } else {
-              setSubmitError(msg);
-            }
+            setSubmitError(err instanceof Error ? err.message : "حدث خطأ غير متوقع");
           },
         }
       );
@@ -306,6 +294,23 @@ export default function EventForm() {
   }
 
   const selectedCategory = form.watch("category");
+
+  // تقدير الرسوم مباشرةً أثناء التعبئة — العميل يعرف الكلفة قبل الحفظ لا بعده.
+  // الحساب النهائي يتم في قاعدة البيانات من صف المناسبة، وهذا عرض فقط.
+  const { data: appSettings } = useGetAppSettings();
+  const watchedCover = form.watch("coverImage");
+  const watchedAudio = form.watch("audioFile");
+  const watchedTemplate = form.watch("templateId");
+  const feeLines = appSettings
+    ? [
+        { label: "إنشاء الدعوة وإرسالها", amount: appSettings.feeBaseAmount, on: true },
+        { label: "صورة الغلاف", amount: appSettings.feeCoverImageAmount, on: Boolean(watchedCover) },
+        { label: "التسجيل الصوتي", amount: appSettings.feeAudioAmount, on: Boolean(watchedAudio) },
+        { label: "القالب المميز", amount: appSettings.feeTemplateAmount, on: watchedTemplate != null },
+      ].filter((line) => line.on && line.amount > 0)
+    : [];
+  const feeTotal = feeLines.reduce((sum, line) => sum + line.amount, 0);
+  const feeUnit = !appSettings || appSettings.sendFeeCurrency === "SAR" ? "ريال" : appSettings.sendFeeCurrency;
 
   return (
     <AppLayout>
@@ -612,6 +617,29 @@ export default function EventForm() {
                 {submitError && (
                   <div className="mt-6 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 text-right">
                     ⚠️ {submitError}
+                  </div>
+                )}
+
+                {feeTotal > 0 && (
+                  <div
+                    className="mt-6 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-right text-sm"
+                    data-testid="fee-estimate"
+                  >
+                    <p className="mb-2 text-xs font-medium text-gray-600">
+                      رسوم إرسال هذه الدعوة — تُدفع عند الإرسال لا الآن
+                    </p>
+                    <ul className="space-y-1">
+                      {feeLines.map((line) => (
+                        <li key={line.label} className="flex items-center justify-between text-gray-700">
+                          <span>{line.label}</span>
+                          <span className="font-medium text-gray-900">{line.amount} {feeUnit}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-2 flex items-center justify-between border-t border-gray-200 pt-2 font-bold text-gray-900">
+                      <span>الإجمالي</span>
+                      <span>{feeTotal} {feeUnit}</span>
+                    </div>
                   </div>
                 )}
 
