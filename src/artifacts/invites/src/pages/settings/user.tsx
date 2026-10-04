@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import {
   useDeleteMyAccount,
+  useGetAppSettings,
   useGetDashboardSummary,
   useListTemplates,
   useUpdateMyProfile,
@@ -107,11 +108,11 @@ export default function UserSettings({ me }: { me: Me }) {
     });
   };
 
-  const isPaid = me.plan === "paid";
-  const planEnd = safeDate(me.planEndDate);
-  const planExpired = isPaid && planEnd !== null && planEnd.getTime() < Date.now();
+  const { data: settings } = useGetAppSettings();
   const usedEvents = summary?.eventsCount ?? 0;
-  const limitLabel = me.eventsLimit === null ? "غير محدود" : String(me.eventsLimit);
+  const currency = settings?.sendFeeCurrency || "ريال";
+  const priceLabel = (amount: number) =>
+    amount > 0 ? `${amount} ${currency === "SAR" ? "ريال" : currency}` : "مجاناً";
   const templateOptions = [
     { value: "", label: "بدون قالب افتراضي" },
     ...(templates ?? []).map((template) => ({ value: String(template.id), label: template.name })),
@@ -159,37 +160,40 @@ export default function UserSettings({ me }: { me: Me }) {
         <AccountSecurityCard currentEmail={me.email} />
 
         <SettingsCard
-          id="plan"
+          id="pricing"
           icon={Crown}
-          title="الباقة الحالية"
-          description="حالة اشتراكك والحد المتاح للمناسبات."
+          title="أسعار إرسال الدعوات"
+          description="لا باقات ولا حد لعدد المناسبات — تدفع عند الإرسال بحسب ما تستخدمه."
         >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`text-sm font-bold px-3 py-1 rounded-full ${isPaid ? "bg-gold/15 text-gold-deep" : "bg-gray-100 text-gray-700"}`}>
-              {isPaid ? "الباقة الماسية" : "الباقة المجانية"}
-            </span>
-            <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${planExpired ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700"}`}>
-              {planExpired ? "منتهية" : "سارية"}
-            </span>
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center justify-between py-1.5 border-b border-gray-100">
+              <span className="text-gray-700">إنشاء الدعوة وإرسالها</span>
+              <span className="font-medium text-gray-900">{priceLabel(settings?.feeBaseAmount ?? 0)}</span>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-gray-100">
+              <span className="text-gray-700">إضافة صورة غلاف</span>
+              <span className="font-medium text-gray-900">+ {priceLabel(settings?.feeCoverImageAmount ?? 0)}</span>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-gray-100">
+              <span className="text-gray-700">إضافة تسجيل صوتي</span>
+              <span className="font-medium text-gray-900">+ {priceLabel(settings?.feeAudioAmount ?? 0)}</span>
+            </div>
+            {(settings?.feeTemplateAmount ?? 0) > 0 && (
+              <div className="flex items-center justify-between py-1.5 border-b border-gray-100">
+                <span className="text-gray-700">القالب المميز</span>
+                <span className="font-medium text-gray-900">+ {priceLabel(settings?.feeTemplateAmount ?? 0)}</span>
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-2 gap-4 text-sm pt-2">
             <div>
-              <p className="text-gray-500">المناسبات المستخدمة</p>
-              <p className="font-medium text-gray-800 mt-0.5">{usedEvents} من {limitLabel}</p>
+              <p className="text-gray-500">مناسباتك</p>
+              <p className="font-medium text-gray-800 mt-0.5">{usedEvents} — غير محدودة</p>
             </div>
             <div>
-              <p className="text-gray-500">{isPaid ? "تنتهي في" : "تجديد تلقائي"}</p>
-              <p className="font-medium text-gray-800 mt-0.5">{isPaid ? formatDay(me.planEndDate) : "لا ينتهي"}</p>
+              <p className="text-gray-500">اشتراك شهري</p>
+              <p className="font-medium text-gray-800 mt-0.5">لا يوجد</p>
             </div>
-          </div>
-          <div className="pt-3 border-t border-gray-100">
-            <Link
-              href="/subscription"
-              className="inline-flex items-center gap-2 bg-ink text-gold-light px-5 py-2.5 rounded-md font-medium hover:bg-ink-soft transition-colors"
-            >
-              <Crown className="w-4 h-4" />
-              إدارة الاشتراك والترقية
-            </Link>
           </div>
         </SettingsCard>
         <SettingsCard
