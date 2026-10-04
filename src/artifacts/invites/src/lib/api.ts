@@ -221,7 +221,6 @@ export const getListEventsQueryKey = () => ["events"] as const;
 export const getGetEventQueryKey = (id: number) => ["events", id] as const;
 export const getListGuestsQueryKey = (eventId: number) => ["guests", eventId] as const;
 export const getGetPublicInvitationQueryKey = (slug: string) => ["invitation", slug] as const;
-export const getGetSubscriptionQueryKey = () => ["subscription"] as const;
 export const getGetAdminStatsQueryKey = () => ["admin", "stats"] as const;
 export const getListAdminUsersQueryKey = () => ["admin", "users"] as const;
 export const getListAdminEventsQueryKey = () => ["admin", "events"] as const;
@@ -895,33 +894,48 @@ export function useSubmitRsvp() {
   });
 }
 
-// ---------------- الاشتراك ----------------
-/**
- * [ن-4] مشتقّة مباشرة من useGetMe.
- * تغليفها في useQuery منفصل كان يخزّن نسخة قديمة من الباقة،
- * فلا تعكس الواجهة الترقية إلا بعد إبطال مفتاحين منفصلين.
- */
-export function useGetSubscription() {
-  const me = useGetMe();
-  return {
-    ...me,
-    data: me.data
-      ? { plan: me.data.plan, eventsLimit: me.data.eventsLimit }
-      : undefined,
-  };
+// ---------------- تسعير المناسبة ----------------
+/** بند واحد في فاتورة المناسبة */
+export interface FeeItem { key: string; label: string; amount: number; applied: boolean }
+export interface EventFeeBreakdown {
+  currency: string;
+  /** المطلوب الآن بحسب المزايا المستخدمة فعلاً */
+  total: number;
+  /** ما سبق سداده لهذه المناسبة */
+  paid: number;
+  items: FeeItem[];
 }
 
-export function useUpgradeSubscription() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase.rpc("upgrade_my_subscription");
-      throwIf(error);
-    },
-    onSuccess: () => {
-      // مصدر واحد للحقيقة: الباقة والحد يأتيان من ["me"]
-      qc.invalidateQueries({ queryKey: getGetMeQueryKey() });
-      qc.invalidateQueries({ queryKey: getListEventsQueryKey() });
+export const getEventFeeBreakdownQueryKey = (eventId: number) =>
+  ["event-fee", eventId] as const;
+
+/**
+ * تفصيل السعر التراكمي للمناسبة. المزايا تُقرأ في قاعدة البيانات من صف
+ * المناسبة نفسه لا مما يرسله المتصفح، فلا يمكن تخفيض السعر من الواجهة.
+ */
+export function useEventFeeBreakdown(eventId: number) {
+  return useQuery({
+    queryKey: getEventFeeBreakdownQueryKey(eventId),
+    enabled: Number.isFinite(eventId),
+    queryFn: async (): Promise<EventFeeBreakdown | null> => {
+      const { data, error } = await supabase.rpc("event_fee_breakdown", {
+        p_event_id: eventId,
+      });
+      // الدالة غير موجودة قبل تطبيق الهجرة 0013
+      if (error || !data) return null;
+      const raw = data as Record<string, unknown>;
+      const items = Array.isArray(raw.items) ? (raw.items as Record<string, unknown>[]) : [];
+      return {
+        currency: String(raw.currency ?? "SAR"),
+        total: Number(raw.total ?? 0),
+        paid: Number(raw.paid ?? 0),
+        items: items.map((i) => ({
+          key: String(i.key ?? ""),
+          label: String(i.label ?? ""),
+          amount: Number(i.amount ?? 0),
+          applied: Boolean(i.applied),
+        })),
+      };
     },
   });
 }
@@ -1146,8 +1160,16 @@ export interface AppSettings {
   privacyText: string;
   refundText: string;
   contentPolicyText: string;
-  /** رسوم إرسال الدعوات لكل مناسبة — 0 = مجاني بلا شاشة دفع */
+  /** @deprecated منذ 0013 — بقي للتوافق؛ السعر يُحسب من الأعمدة التالية */
   sendFeeAmount: number;
+  /** أساس رسوم الإرسال لكل مناسبة — 0 = مجاني بلا شاشة دفع */
+  feeBaseAmount: number;
+  /** يُضاف عند وجود صورة غلاف */
+  feeCoverImageAmount: number;
+  /** يُضاف عند وجود تسجيل صوتي */
+  feeAudioAmount: number;
+  /** يُضاف عند اختيار قالب مميز */
+  feeTemplateAmount: number;
   sendFeeCurrency: string;
   bankName: string;
   bankAccountName: string;
@@ -1170,7 +1192,6 @@ export type FeatureKey =
   | "contacts_import"
   | "qr_code"
   | "whatsapp_send"
-  | "subscription_page"
   | "announcements_bar"
   | "public_rsvp";
 
@@ -1180,7 +1201,6 @@ export const FEATURE_DEFAULTS: FeatureFlags = {
   contacts_import: true,
   qr_code: true,
   whatsapp_send: true,
-  subscription_page: true,
   announcements_bar: true,
   public_rsvp: true,
 };
@@ -1189,7 +1209,6 @@ export const FEATURE_LABELS: Record<FeatureKey, { label: string; hint: string }>
   contacts_import: { label: "استيراد جهات الاتصال", hint: "زر «جهات الاتصال» في صفحة المناسبة (اختصار الآيفون، منتقي أندرويد، VCF وCSV)." },
   qr_code: { label: "رمز QR ورابط الدعوة", hint: "زر «رمز QR والرابط» في صفحة المناسبة." },
   whatsapp_send: { label: "إرسال الدعوات عبر واتساب", hint: "زر «إرسال الدعوات» وقائمة الإرسال." },
-  subscription_page: { label: "صفحة الباقات", hint: "رابط «الباقة» في قائمة المستخدم." },
   announcements_bar: { label: "شريط الإعلانات", hint: "بطاقة الإعلانات في الصفحة الرئيسية ولوحة العميل." },
   public_rsvp: { label: "رد المدعوين على الدعوة", hint: "أزرار «سأحضر/أعتذر» في صفحة الدعوة العامة." },
 };
@@ -1234,6 +1253,10 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   refundText: "refund_text",
   contentPolicyText: "content_policy_text",
   sendFeeAmount: "send_fee_amount",
+  feeBaseAmount: "fee_base_amount",
+  feeCoverImageAmount: "fee_cover_image_amount",
+  feeAudioAmount: "fee_audio_amount",
+  feeTemplateAmount: "fee_template_amount",
   sendFeeCurrency: "send_fee_currency",
   bankName: "bank_name",
   bankAccountName: "bank_account_name",
@@ -1271,6 +1294,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   refundText: "",
   contentPolicyText: "",
   sendFeeAmount: 0,
+  feeBaseAmount: 5,
+  feeCoverImageAmount: 3,
+  feeAudioAmount: 2,
+  feeTemplateAmount: 0,
   sendFeeCurrency: "SAR",
   bankName: "",
   bankAccountName: "",
