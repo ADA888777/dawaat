@@ -1502,9 +1502,16 @@ export function useGetEventPayment(eventId: number, opts?: QueryOpts) {
   return useQuery({
     queryKey: getGetEventPaymentQueryKey(eventId),
     enabled: opts?.query?.enabled ?? Number.isFinite(eventId),
-    // أثناء مراجعة الإدارة نعيد الاستعلام كل نصف دقيقة حتى يُفتح الإرسال تلقائياً
-    refetchInterval: (query) =>
-      query.state.data?.status === "submitted" ? 30_000 : false,
+    // أثناء مراجعة الإدارة نعيد الاستعلام كل نصف دقيقة حتى يُفتح الإرسال تلقائياً.
+    // ومع دفعة بطاقة معلّقة نستطلع كل 5 ثوانٍ: تأكيد بيلينك قد يصل عبر الـ webhook
+    // بعد عودة العميل بلحظات، فتنقلب الحالة إلى «تم الدفع» دون أي ضغطة.
+    refetchInterval: (query) => {
+      const row = query.state.data;
+      if (!row) return false;
+      if (row.status === "submitted") return 30_000;
+      if (row.status === "pending" && row.method === "gateway") return 5_000;
+      return false;
+    },
     queryFn: async (): Promise<EventPayment | null> => {
       const { data, error } = await supabase
         .from("event_payments").select("*")
@@ -1650,7 +1657,7 @@ export function useReviewEventPayment() {
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   pending: "بانتظار الدفع",
   submitted: "بانتظار مراجعة الإدارة",
-  paid: "مدفوعة",
+  paid: "تم الدفع",
   rejected: "مرفوضة",
   cancelled: "ملغاة",
 };
