@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useGetMe, useGetAppSettings, useFeature } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Home, Calendar, CreditCard, Shield, Settings, LogOut, Menu, X, Loader2 } from "lucide-react";
+import { Home, Calendar, Shield, Settings, LogOut, Menu, X, Loader2 } from "lucide-react";
 import { SidebarContact } from "./sidebar-contact";
 
 interface AppLayoutProps {
@@ -15,7 +15,6 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { data: user, isLoading } = useGetMe();
   const { data: settings } = useGetAppSettings();
   const siteName = settings?.siteName || "دعوات";
-  const subscriptionEnabled = useFeature("subscription_page");
 
   // اسم الموقع قابل للتغيير من إعدادات الأدمن، فيتبعه عنوان التبويب أيضاً
   useEffect(() => {
@@ -32,7 +31,6 @@ export function AppLayout({ children }: AppLayoutProps) {
       : [
           { name: "الرئيسية", href: "/dashboard", icon: Home },
           { name: "دعواتي", href: "/events", icon: Calendar },
-          ...(subscriptionEnabled ? [{ name: "الباقة", href: "/subscription", icon: CreditCard }] : []),
           { name: "الإعدادات", href: "/settings", icon: Settings },
         ];
 
