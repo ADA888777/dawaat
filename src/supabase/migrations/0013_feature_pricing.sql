@@ -22,7 +22,12 @@
 -- نُبقي العمود والمشغّل (لا نكسر بيانات ولا نعتمد على ترتيب الهجرات)
 -- لكن نجعلهما بلا أثر: أي حد قديم يُمسح، والدالة تمرّر كل شيء.
 alter table public.profiles alter column events_limit set default null;
+-- تريجر protect_profile_columns يمنع لمس events_limit حتى من محرر SQL
+-- (نسخة الإنتاج أقدم من schema.sql ولا تستثني الجلسة الخالية من مستخدم)،
+-- فنعطّله حول هذا التحديث وحده — النمط نفسه المستخدم في 0001 و0002.
+alter table public.profiles disable trigger protect_profile_columns;
 update public.profiles set events_limit = null where events_limit is not null;
+alter table public.profiles enable trigger protect_profile_columns;
 
 create or replace function public.enforce_events_limit()
 returns trigger
