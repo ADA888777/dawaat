@@ -34,6 +34,7 @@ import {
   type EventPayment,
   useStartGatewayPayment,
   useGetMe,
+  useEventFeeBreakdown,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -50,6 +51,9 @@ interface SendPaymentDialogProps {
   /** يُستدعى عندما تكون العملية مدفوعة والمستخدم يريد المتابعة للإرسال */
   onContinue: () => void;
 }
+
+/** الحد الأدنى لفاتورة بوابة بيلينك — أقل منه ترفضه البوابة نفسها */
+const GATEWAY_MIN_AMOUNT = 5;
 
 /** 150 → «150 ريال»، 150.5 → «150.50 ريال» */
 export function formatFee(amount: number, currency: string): string {
@@ -94,6 +98,7 @@ export function SendPaymentDialog({
   const requestPayment = useRequestEventPayment();
   const submitPayment = useSubmitEventPayment();
   const startGatewayPayment = useStartGatewayPayment();
+  const { data: fees } = useEventFeeBreakdown(eventId);
 
   const [reference, setReference] = useState("");
   const [proofFile, setProofFile] = useState<File | null>(null);
@@ -233,6 +238,32 @@ export function SendPaymentDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {/* تفصيل السعر — العميل يرى مم تكوّن المبلغ */}
+        {fees && fees.items.some((item) => item.applied && item.amount > 0) && (
+          <div
+            className="rounded-xl border border-line bg-white px-4 py-3 text-sm"
+            data-testid="fee-breakdown"
+          >
+            <p className="mb-2 text-xs font-medium text-gray-600">تفصيل الرسوم</p>
+            <ul className="space-y-1.5">
+              {fees.items
+                .filter((item) => item.applied && item.amount > 0)
+                .map((item) => (
+                  <li key={item.key} className="flex items-center justify-between text-gray-700">
+                    <span>{item.label}</span>
+                    <span className="font-medium text-gray-900">{formatFee(item.amount, fees.currency)}</span>
+                  </li>
+                ))}
+            </ul>
+            {fees.paid > 0 && fees.paid < fees.total && (
+              <p className="mt-2 border-t border-gray-100 pt-2 text-xs text-gray-600">
+                سبق سداد {formatFee(fees.paid, fees.currency)} لهذه المناسبة، والمطلوب الآن هو الفرق
+                بعد إضافة ميزة جديدة.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* المبلغ — واضح دائماً */}
         <div className="flex items-center justify-between rounded-xl border border-line bg-cream-2 px-4 py-3">
           <div>
@@ -339,8 +370,16 @@ export function SendPaymentDialog({
               </div>
             )}
 
+            {/* مبلغ أقل من حد البوابة لا يمكن دفعه بالبطاقة — نقولها بدل زر يفشل */}
+            {settings.paymentGatewayEnabled && amount > 0 && amount < GATEWAY_MIN_AMOUNT && (
+              <p className="rounded-xl border border-line bg-cream-2 px-4 py-3 text-xs leading-relaxed text-gray-700">
+                الدفع بالبطاقة متاح من {formatFee(GATEWAY_MIN_AMOUNT, currency)} فأكثر، وهذا المبلغ أقل
+                من ذلك — أكمله بالتحويل البنكي أدناه.
+              </p>
+            )}
+
             {/* الدفع بالبطاقة: فوري ولا يحتاج مراجعة الأدمن */}
-            {settings.paymentGatewayEnabled && (
+            {settings.paymentGatewayEnabled && amount >= GATEWAY_MIN_AMOUNT && (
               <section className="space-y-2 rounded-xl border-2 border-gold bg-gold/5 p-4" data-testid="pay-by-card">
                 <h3 className="flex items-center gap-2 text-sm font-bold text-gray-900">
                   <CreditCard className="h-4 w-4 text-gold-deep" /> ادفع بالبطاقة — فوري

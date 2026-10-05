@@ -23,7 +23,6 @@ const Dashboard          = lazy(() => import("@/pages/dashboard"));
 const EventsList         = lazy(() => import("@/pages/events/index"));
 const EventForm          = lazy(() => import("@/pages/events/form"));
 const EventDetail        = lazy(() => import("@/pages/events/detail"));
-const SubscriptionPage   = lazy(() => import("@/pages/subscription"));
 const AdminPage          = lazy(() => import("@/pages/admin/index"));
 const TermsPage          = lazy(() => import("@/pages/policies/terms"));
 const PrivacyPage        = lazy(() => import("@/pages/policies/privacy"));
@@ -147,7 +146,6 @@ function AppRoutes() {
         <Route path="/events/new"><ProtectedRoute component={EventForm} /></Route>
         <Route path="/events/:id/edit"><ProtectedRoute component={EventForm} /></Route>
         <Route path="/events/:id"><ProtectedRoute component={EventDetail} /></Route>
-        <Route path="/subscription"><ProtectedRoute component={SubscriptionPage} requiredRole="user" /></Route>
         <Route path="/settings"><ProtectedRoute component={SettingsPage} /></Route>
         <Route path="/admin"><ProtectedRoute component={AdminPage} requiredRole="admin" /></Route>
         <Route path="/admin/:section"><ProtectedRoute component={AdminPage} requiredRole="admin" /></Route>

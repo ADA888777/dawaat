@@ -31,7 +31,7 @@ select id, 'مدعو بوب', '0500000002' from public.events where title = 'ز�
 
 do $$
 declare
-  v_cnt int; v_limit int; v_slug text; v_slug2 text;
+  v_cnt int; v_limit int; v_count int; v_slug text; v_slug2 text;
   v_token uuid; v_status public.attendance_status; v_ok boolean;
   v_event bigint; v_pay bigint; v_pay2 bigint; v_ids bigint[];
   v_pstatus public.payment_status; v_sstatus public.sending_status; v_amount numeric;
@@ -104,23 +104,27 @@ begin
   raise notice '✅ 6: share_slug يُولَّد في قاعدة البيانات (18 خانة، فريد)';
 
   -- =================================================================
-  -- اختبار 7 [ع-5]: حد الباقة المجانية = 3 ويُفرض فعلاً
+  -- اختبار 7 [ع-5]: أُلغيت الباقات (0013) — لا حد لعدد المناسبات
   -- =================================================================
   select events_limit into v_limit from public.profiles
    where id = '22222222-2222-2222-2222-222222222222';
-  if v_limit <> 1 then raise exception 'فشل 7: الحد % بدل 1', v_limit; end if;
+  if v_limit is not null then
+    raise exception 'فشل 7: ما زال هناك حد % للمناسبات', v_limit;
+  end if;
 
-  begin
-    insert into public.events (user_id, title, category, event_date, location)
-    values ('22222222-2222-2222-2222-222222222222','رابعة','general', now()+interval '5 days','جدة');
-    raise exception 'فشل 7ب: تجاوز حد الباقة!';
-  exception when others then
-    if sqlerrm like 'فشل 7%' then raise; end if;
-    if sqlerrm not like 'EVENTS_LIMIT_REACHED%' then
-      raise exception 'فشل 7ج: رمز خطأ غير متوقع: %', sqlerrm;
-    end if;
-    raise notice '✅ 7: حد الباقة المجانية = 1 ويُفرض برمز EVENTS_LIMIT_REACHED';
-  end;
+  select count(*) into v_count from public.events
+   where user_id = '22222222-2222-2222-2222-222222222222';
+
+  insert into public.events (user_id, title, category, event_date, location)
+  values ('22222222-2222-2222-2222-222222222222','رابعة','general', now()+interval '5 days','جدة');
+  insert into public.events (user_id, title, category, event_date, location)
+  values ('22222222-2222-2222-2222-222222222222','خامسة','general', now()+interval '6 days','جدة');
+
+  if (select count(*) from public.events
+       where user_id = '22222222-2222-2222-2222-222222222222') <> v_count + 2 then
+    raise exception 'فشل 7ب: لم تُضَف المناسبتان — المنع ما زال قائماً';
+  end if;
+  raise notice '✅ 7: لا حد لعدد المناسبات بعد إلغاء الباقات';
 
   -- =================================================================
   -- اختبار 8 [ح-1]: submit_rsvp يرفض المدخلات غير الصالحة
@@ -311,7 +315,8 @@ begin
   -- اختبار 17 [دفع]: لا إرسال قبل الدفع — والدفع يمر بموافقة الأدمن
   -- =================================================================
   reset role;
-  update public.app_settings set send_fee_amount = 50;
+  update public.app_settings set send_fee_amount = 50, fee_base_amount = 50,
+         fee_cover_image_amount = 0, fee_audio_amount = 0, fee_template_amount = 0;
 
   -- أليس تطلب الدفع لمناسبتها: عملية pending بالمبلغ الحالي
   set local role authenticated;
@@ -398,7 +403,7 @@ begin
 
   -- رسوم صفر = الإرسال مجاني بلا شاشة دفع (مناسبة بوب)
   reset role;
-  update public.app_settings set send_fee_amount = 0;
+  update public.app_settings set send_fee_amount = 0, fee_base_amount = 0;
   set local role authenticated;
   perform set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222', true);
   select id into v_event from public.events where title = 'زفاف بوب';
@@ -501,7 +506,7 @@ begin
   end;
 
   update public.templates set name = 'اختراق';
-  update public.app_settings set feature_flags = '{"hacked":true}'::jsonb, send_fee_amount = 0;
+  update public.app_settings set feature_flags = '{"hacked":true}'::jsonb, send_fee_amount = 0, fee_base_amount = 0;
   reset role;
   select count(*) into v_cnt from public.templates where name = 'اختراق';
   if v_cnt <> 0 then raise exception 'فشل 20ب: مستخدم عادي عدّل قالباً!'; end if;
@@ -665,7 +670,8 @@ begin
   -- ═══════════ 23) بوابة الدفع (بيلينك): السر المشترك يحمي تأكيد الدفع ═══════════
   reset role;
   -- رسوم إرسال فعلية حتى لا تُنشأ العملية مجانية
-  update public.app_settings set send_fee_amount = 25 where id = true;
+  update public.app_settings set send_fee_amount = 25, fee_base_amount = 25,
+         fee_cover_image_amount = 0, fee_audio_amount = 0, fee_template_amount = 0 where id = true;
   -- الأدمن يضبط السر المشترك
   perform set_config('request.jwt.claim.sub','33333333-3333-3333-3333-333333333333', true);
   set local role authenticated;
@@ -746,8 +752,86 @@ begin
   end;
 
   reset role;
-  update public.app_settings set send_fee_amount = 0 where id = true;
+  update public.app_settings set send_fee_amount = 0, fee_base_amount = 0 where id = true;
   raise notice '✅ 23: بوابة الدفع — السر المشترك، تطابق المبلغ، منع تكرار الـ webhook، فتح الإرسال بعد الدفع';
+
+  -- =================================================================
+  -- اختبار 24 [تسعير]: السعر تراكمي بحسب المزايا، والدفعة التكميلية
+  -- =================================================================
+  reset role;
+  update public.app_settings
+     set fee_base_amount = 5, fee_cover_image_amount = 3,
+         fee_audio_amount = 2, fee_template_amount = 0,
+         send_fee_amount = 5
+   where id = true;
+
+  insert into public.events (user_id, title, category, event_date, location)
+  values ('11111111-1111-1111-1111-111111111111','تسعير','general', now()+interval '20 days','الرياض')
+  returning id into v_event;
+
+  -- أ) مناسبة بلا مزايا = الأساس وحده
+  if public.event_fee_amount(v_event) <> 5 then
+    raise exception 'فشل 24أ: السعر الأساسي % بدل 5', public.event_fee_amount(v_event);
+  end if;
+
+  -- ب) إضافة صورة وصوت تجمع الأسعار
+  update public.events set cover_image = 'covers/x.jpg', audio_file = 'audio/y.m4a'
+   where id = v_event;
+  if public.event_fee_amount(v_event) <> 10 then
+    raise exception 'فشل 24ب: السعر التراكمي % بدل 10', public.event_fee_amount(v_event);
+  end if;
+
+  -- ج) طلب الدفع يأتي بالمبلغ الكامل، والإرسال مقفل
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', true);
+  select id, amount into v_pay, v_amount from public.request_event_payment(v_event);
+  if v_amount <> 10 then
+    raise exception 'فشل 24ج: مبلغ العملية % بدل 10', v_amount;
+  end if;
+  if public.event_sending_unlocked(v_event) then
+    raise exception 'فشل 24د: الإرسال مفتوح قبل الدفع!';
+  end if;
+
+  -- د) بعد السداد الكامل يُفتح الإرسال
+  reset role;
+  update public.event_payments set status = 'paid', paid_at = now() where id = v_pay;
+  if not public.event_sending_unlocked(v_event) then
+    raise exception 'فشل 24هـ: الإرسال ما زال مقفلاً بعد السداد الكامل';
+  end if;
+
+  -- هـ) إضافة قالب مسعَّر بعد الدفع تقفل الإرسال وتولّد دفعة تكميلية بالفرق
+  update public.app_settings set fee_template_amount = 4 where id = true;
+  update public.events
+     set template_id = (select id from public.templates order by id limit 1)
+   where id = v_event;
+  if public.event_fee_amount(v_event) <> 14 then
+    raise exception 'فشل 24و: السعر بعد القالب % بدل 14', public.event_fee_amount(v_event);
+  end if;
+  if public.event_sending_unlocked(v_event) then
+    raise exception 'فشل 24ز: ميزة مسعَّرة أُضيفت بعد الدفع بلا مقابل!';
+  end if;
+
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111', true);
+  select id, amount into v_pay2, v_amount from public.request_event_payment(v_event);
+  if v_pay2 = v_pay then
+    raise exception 'فشل 24ح: أُعيدت العملية المدفوعة بدل إنشاء دفعة تكميلية';
+  end if;
+  if v_amount <> 4 then
+    raise exception 'فشل 24ط: الدفعة التكميلية % بدل 4 (الفرق)', v_amount;
+  end if;
+
+  reset role;
+  update public.event_payments set status = 'paid', paid_at = now() where id = v_pay2;
+  if not public.event_sending_unlocked(v_event) then
+    raise exception 'فشل 24ي: الإرسال مقفل رغم سداد الفرق';
+  end if;
+
+  update public.app_settings
+     set fee_base_amount = 5, fee_cover_image_amount = 3,
+         fee_audio_amount = 2, fee_template_amount = 0, send_fee_amount = 0
+   where id = true;
+  raise notice '✅ 24: التسعير التراكمي — المزايا تُسعَّر من صف المناسبة، والإضافة بعد الدفع تتطلب دفعة تكميلية بالفرق';
 
   raise notice '';
   raise notice '════════════════════════════════';
