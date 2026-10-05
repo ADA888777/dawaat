@@ -24,7 +24,7 @@ import { ar } from "date-fns/locale";
 const SECTIONS = [
   { id: "overview", label: "نظرة عامة", icon: BarChart3 },
   { id: "users", label: "المستخدمون والاشتراكات", icon: Users },
-  { id: "plans", label: "الباقات والرسوم", icon: Crown },
+  { id: "plans", label: "الأسعار والدفع", icon: Crown },
   { id: "payments", label: "المدفوعات", icon: Banknote },
   { id: "events", label: "المناسبات", icon: Calendar },
   { id: "guests", label: "المدعوون", icon: ListChecks },
@@ -41,7 +41,7 @@ type SectionId = (typeof SECTIONS)[number]["id"];
 /** ما يعرضه كل قسم من بطاقات صفحة الإعدادات الإدارية */
 const SECTION_CARDS: Partial<Record<SectionId, AdminCardId[]>> = {
   users: ["users"],
-  plans: ["plans", "send-fee"],
+  plans: ["send-fee"],
   contact: ["support"],
   content: ["content", "invites"],
   site: ["site", "notifications"],
