@@ -67,9 +67,33 @@ async function paylinkToken(env: PaylinkEnv): Promise<string> {
   });
   const data = (await res.json().catch(() => null)) as { id_token?: string } | null;
   if (!res.ok || !data?.id_token) {
-    throw new Error("PAYLINK_AUTH_FAILED");
+    // رمز الحالة فقط — لا نسجّل المفاتيح ولا جسم الرد الذي قد يحويها
+    console.error("paylink auth failed", { status: res.status, base: paylinkBase(env) });
+    throw new Error("PAYLINK_AUTH_FAILED:" + res.status);
   }
   return data.id_token;
+}
+
+/**
+ * رسالة دقيقة بدل «غير متاحة» العامة: 401/403 من بيلينك تعني أن المفاتيح في
+ * Cloudflare لا تطابق حساب بيلينك (غالباً جُدِّد Secret Key بعد ضبطها)، وما
+ * عداها عطل شبكة أو عند بيلينك. الرسالة للأدمن عملياً لكنها آمنة للعميل.
+ */
+function authFailureResponse(err: unknown): Response {
+  const msg = err instanceof Error ? err.message : String(err);
+  const status = Number((msg.match(/^PAYLINK_AUTH_FAILED:(\d+)/) ?? [])[1] ?? 0);
+  if (status === 401 || status === 403) {
+    return jsonResponse(
+      {
+        ok: false,
+        code: "GATEWAY_AUTH",
+        message:
+          "بوابة الدفع رفضت مفاتيح الربط — راجعي PAYLINK_API_ID وPAYLINK_SECRET_KEY في Cloudflare لتطابق صفحة مفاتيح بيلينك.",
+      },
+      502,
+    );
+  }
+  return jsonResponse({ ok: false, code: "GATEWAY_UNAVAILABLE", message: "بوابة الدفع غير متاحة الآن." }, 502);
 }
 
 interface InvoiceResult {
@@ -229,9 +253,11 @@ export async function handlePayCreate(
 
   const origin = new URL(request.url).origin;
   const orderNumber = "DAWAAT-" + payment.id;
-  const token = await paylinkToken(env).catch(() => null);
-  if (!token) {
-    return jsonResponse({ ok: false, code: "GATEWAY_UNAVAILABLE", message: "بوابة الدفع غير متاحة الآن." }, 502);
+  let token: string;
+  try {
+    token = await paylinkToken(env);
+  } catch (err) {
+    return authFailureResponse(err);
   }
 
   let invoice: InvoiceResult;
