@@ -152,10 +152,22 @@ export function SendPaymentDialog({
     }
   }, [open]);
 
-  const amount = payment ? payment.amount : settings.sendFeeAmount;
+  const amount = payment ? payment.amount : settings.feeBaseAmount;
   const currency = payment ? payment.currency : settings.sendFeeCurrency;
   const status = payment?.status ?? null;
   const canSubmit = status === "pending" || status === "rejected";
+
+  // البطاقة هي المسار الأساسي متى كانت البوابة مفعّلة والمبلغ يقبله بيلينك.
+  // التحويل البنكي يبقى بديلاً مطويّاً لا يراه العميل إلا إن طلبه، أو إن كان
+  // المبلغ أقل من حد البوابة، أو إن كانت البوابة معطّلة.
+  const cardIsPrimary = settings.paymentGatewayEnabled && amount >= GATEWAY_MIN_AMOUNT;
+  const [showBank, setShowBank] = useState(false);
+  useEffect(() => {
+    if (!open) setShowBank(false);
+  }, [open]);
+  const bankVisible = !cardIsPrimary || showBank;
+  // دفعة بطاقة معلّقة = العميل ربما عاد للتو من بيلينك والتأكيد في الطريق
+  const awaitingGateway = status === "pending" && payment?.method === "gateway";
 
   /**
    * الدفع بالبطاقة: الموقع يطلب رابط الدفع من الـ Worker ثم يحوّل العميل إليه.
@@ -234,7 +246,7 @@ export function SendPaymentDialog({
             رسوم إرسال الدعوات
           </DialogTitle>
           <DialogDescription className="text-right">
-            {eventTitle} — لا تُرسل أي دعوة قبل تأكيد الدفع.
+            {eventTitle} — رسوم هذه المناسبة وحدها، ولا تُرسل أي دعوة قبل تأكيد الدفع.
           </DialogDescription>
         </DialogHeader>
 
@@ -385,7 +397,8 @@ export function SendPaymentDialog({
                   <CreditCard className="h-4 w-4 text-gold-deep" /> ادفع بالبطاقة — فوري
                 </h3>
                 <p className="text-xs leading-relaxed text-gray-700">
-                  مدى أو فيزا أو ماستركارد أو Apple Pay. يفتح الإرسال فور نجاح الدفع بلا انتظار مراجعة.
+                  مدى أو فيزا أو ماستركارد أو Apple Pay عبر صفحة بيلينك الآمنة. يُفتح الإرسال فور
+                  تأكيد الدفع — بلا رفع إثبات ولا انتظار مراجعة.
                 </p>
                 <Button
                   type="button"
@@ -404,8 +417,32 @@ export function SendPaymentDialog({
               </section>
             )}
 
-            {settings.paymentGatewayEnabled && (
-              <p className="text-center text-xs text-gray-500">أو حوّل بنكياً وارفع الإثبات</p>
+            {awaitingGateway && (
+              <p
+                className="flex items-center gap-2 rounded-lg border border-line bg-cream-2 px-3 py-2 text-xs leading-relaxed text-gray-700"
+                data-testid="awaiting-gateway"
+              >
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                إن كنتَ أكملت الدفع للتو فسنتحقق منه مع بيلينك ونحدّث الحالة تلقائياً خلال لحظات.
+              </p>
+            )}
+
+            {/* التحويل البنكي: مطويّ خلف رابط صغير عندما تكون البطاقة هي الأساس */}
+            {cardIsPrimary && hasBankInfo && !showBank && (
+              <button
+                type="button"
+                onClick={() => setShowBank(true)}
+                className="mx-auto block text-xs text-gray-500 underline-offset-4 hover:text-gray-800 hover:underline"
+                data-testid="show-bank-option"
+              >
+                لا تملك بطاقة؟ الدفع بالتحويل البنكي
+              </button>
+            )}
+
+            {bankVisible && (
+            <>
+            {cardIsPrimary && (
+              <p className="text-center text-xs text-gray-500">التحويل البنكي — يحتاج رفع إثبات ومراجعة الإدارة</p>
             )}
 
             <section className="space-y-2 rounded-xl border border-line p-4">
@@ -506,6 +543,8 @@ export function SendPaymentDialog({
                 <span className="text-[11px] text-gray-500">JPG أو PNG أو PDF — حتى 5 ميجابايت</span>
               </button>
             </section>
+            </>
+            )}
           </div>
         )}
 
@@ -518,7 +557,7 @@ export function SendPaymentDialog({
           </div>
         )}
 
-        {canSubmit && payment && (
+        {canSubmit && payment && bankVisible && (
           <Button
             type="button"
             className="h-12 w-full bg-gold font-bold text-black hover:bg-gold/90"
@@ -531,8 +570,9 @@ export function SendPaymentDialog({
         )}
 
         <p className="text-center text-[11px] leading-relaxed text-gray-500">
-          الرسوم تُدفع مرة واحدة لكل مناسبة. بعد موافقة الإدارة يمكنك إرسال الدعوات
-          لكل المدعوين ولمن تضيفهم لاحقاً.
+          {cardIsPrimary
+            ? "الرسوم خاصة بهذه المناسبة وتُدفع مرة واحدة. بعد نجاح الدفع يُفتح الإرسال فوراً لكل المدعوين ولمن تضيفهم لاحقاً."
+            : "الرسوم تُدفع مرة واحدة لكل مناسبة. بعد موافقة الإدارة يمكنك إرسال الدعوات لكل المدعوين ولمن تضيفهم لاحقاً."}
         </p>
       </DialogContent>
     </Dialog>
