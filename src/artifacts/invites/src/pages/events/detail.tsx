@@ -349,6 +349,41 @@ export default function EventDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [iosShortcut.resumedAfterActivation]);
 
+  // العودة من بوابة الدفع: /events/:id?payment=paid|pending|cancelled|error
+  // التأكيد نفسه تم على الخادم؛ هنا نحدّث الحالة ونخبر المستخدم فقط.
+  useEffect(() => {
+    if (!hasValidId || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get("payment");
+    if (!payment) return;
+    params.delete("payment");
+    const query = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      window.location.pathname + (query ? "?" + query : "") + window.location.hash,
+    );
+    void refetchPayment();
+    void refreshGuests();
+    if (payment === "paid") {
+      toast({ title: "تم الدفع بنجاح", description: "الإرسال مفتوح الآن لهذه المناسبة." });
+    } else if (payment === "pending") {
+      toast({
+        title: "لم يكتمل الدفع بعد",
+        description: "إن كنت أتممت الدفع فانتظر لحظات ثم حدّث الحالة.",
+      });
+    } else if (payment === "cancelled") {
+      toast({ title: "أُلغيت عملية الدفع" });
+    } else {
+      toast({
+        title: "تعذر تأكيد الدفع",
+        description: "إن خُصم المبلغ فتواصل مع الدعم ومعك رقم العملية.",
+        variant: "destructive",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasValidId, eventId]);
+
   // الاختصار يعيد المستخدم إلى /events/:id?imported=1 بعد الإرسال (قد تكون
   // علامة تبويب جديدة في سفاري): نحدّث القائمة ونزيل المعامل من الرابط.
   useEffect(() => {

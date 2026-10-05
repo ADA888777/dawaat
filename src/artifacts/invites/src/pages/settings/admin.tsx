@@ -656,9 +656,28 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
             }
           />
 
+          <div className="pt-4 border-t border-gray-100 space-y-4">
+            <ToggleRow
+              label="الدفع بالبطاقة (بوابة بيلينك)"
+              description="يظهر للعميل زر «ادفع بالبطاقة» ويُفتح الإرسال فور نجاح الدفع بلا مراجعة. يتطلب ضبط مفاتيح بيلينك في Cloudflare."
+              checked={form.paymentGatewayEnabled}
+              onCheckedChange={(value) => setField("paymentGatewayEnabled", value)}
+            />
+            <SaveBar
+              pending={updateSettings.isPending}
+              onSave={() => saveSettings(["paymentGatewayEnabled"], "تم حفظ إعداد بوابة الدفع")}
+              label="حفظ البوابة"
+              note={
+                form.paymentGatewayEnabled
+                  ? "العميل يرى «ادفع بالبطاقة» والتحويل البنكي معاً."
+                  : "البوابة مطفأة: التحويل البنكي وحده."
+              }
+            />
+          </div>
+
           <div className="pt-4 border-t border-gray-100 space-y-5">
             <p className="text-sm text-gray-700 leading-relaxed">
-              طريقة الدفع الحالية: تحويل بنكي ثم رفع إثبات التحويل، وتراجعه الإدارة من
+              التحويل البنكي: يحوّل العميل ثم يرفع الإثبات، وتراجعه الإدارة من
               لوحة التحكم ← تبويب «المدفوعات». هذه البيانات تظهر للمستخدم في شاشة الدفع.
             </p>
             <div className="grid grid-cols-2 gap-3">

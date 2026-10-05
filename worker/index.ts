@@ -5,6 +5,10 @@
  *   POST /api/contacts/import   ← يستقبل جهات الاتصال من اختصار الآيفون (Dawaat – Contacts)
  *                                  مع رمز الاستخدام الواحد، ويمرّرها إلى دالة قاعدة البيانات
  *                                  import_contacts_with_token التي تتحقق من الرمز وتُدخل المدعوين.
+ *   POST /api/pay/create        ← ينشئ فاتورة في بوابة «بيلينك» ويعيد رابط الدفع
+ *                                  (بجلسة المستخدم؛ التفاصيل في worker/paylink.ts).
+ *   GET  /api/pay/return        ← عودة العميل بعد الدفع: تحقق ثم تأكيد ثم تحويل للمناسبة.
+ *   POST /api/pay/webhook       ← نداء خادم-لخادم من بيلينك لتأكيد الدفع.
  *   GET  /api/health            ← فحص جاهزية بسيط.
  *   أي مسار آخر                 ← الأصول الثابتة (تطبيق React) كما كان تماماً.
  *
@@ -15,7 +19,14 @@
  * التحقق الفعلي كله في قاعدة البيانات (الرمز المؤقت + RLS).
  */
 
-interface Env {
+import {
+  handlePayCreate,
+  handlePayReturn,
+  handlePayWebhook,
+  type PaylinkEnv,
+} from "./paylink";
+
+interface Env extends PaylinkEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
@@ -216,6 +227,18 @@ export default {
     const { pathname } = new URL(request.url);
 
     if (pathname === "/api/contacts/import") return handleImport(request, env);
+
+    // بوابة الدفع: تحتاج إعدادات Supabase نفسها (anon عام + جلسة المستخدم)
+    if (pathname === "/api/pay/create" || pathname === "/api/pay/return" || pathname === "/api/pay/webhook") {
+      const target = await resolveSupabase(request, env);
+      if (!target) {
+        return json({ ok: false, code: "NOT_CONFIGURED", message: "خدمة الدفع غير مهيأة على هذا النطاق." }, 503);
+      }
+      if (pathname === "/api/pay/create") return handlePayCreate(request, env, target);
+      if (pathname === "/api/pay/return") return handlePayReturn(request, env, target);
+      return handlePayWebhook(request, env, target);
+    }
+
     if (pathname === "/api/health") return json({ ok: true, service: "dawaat", time: new Date().toISOString() });
     if (pathname.startsWith("/api/")) return json({ ok: false, code: "NOT_FOUND" }, 404);
 

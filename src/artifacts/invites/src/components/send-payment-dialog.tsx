@@ -11,6 +11,7 @@ import {
   RefreshCw,
   ShieldCheck,
   XCircle,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,8 @@ import {
   useSubmitEventPayment,
   type AppSettings,
   type EventPayment,
+  useStartGatewayPayment,
+  useGetMe,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -87,8 +90,10 @@ export function SendPaymentDialog({
   onContinue,
 }: SendPaymentDialogProps) {
   const { user } = useAuth();
+  const { data: me } = useGetMe();
   const requestPayment = useRequestEventPayment();
   const submitPayment = useSubmitEventPayment();
+  const startGatewayPayment = useStartGatewayPayment();
 
   const [reference, setReference] = useState("");
   const [proofFile, setProofFile] = useState<File | null>(null);
@@ -146,6 +151,32 @@ export function SendPaymentDialog({
   const currency = payment ? payment.currency : settings.sendFeeCurrency;
   const status = payment?.status ?? null;
   const canSubmit = status === "pending" || status === "rejected";
+
+  /**
+   * الدفع بالبطاقة: الموقع يطلب رابط الدفع من الـ Worker ثم يحوّل العميل إليه.
+   * العودة والتأكيد يتمان على الخادم (/api/pay/return و/api/pay/webhook).
+   */
+  const payByCard = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const out = await startGatewayPayment.mutateAsync({
+        eventId,
+        clientName: me?.name ?? undefined,
+        clientMobile: me?.defaultContactPhone || undefined,
+        clientEmail: me?.email ?? undefined,
+      });
+      if (out.alreadyPaid) {
+        onRefresh();
+        return;
+      }
+      if (!out.url) throw new Error("لم يصل رابط الدفع. حاول مرة أخرى.");
+      window.location.href = out.url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "تعذر فتح صفحة الدفع.");
+      setBusy(false);
+    }
+  };
 
   const copyIban = async () => {
     try {
@@ -306,6 +337,36 @@ export function SendPaymentDialog({
                   <p>يمكنك رفع إثبات جديد بالأسفل.</p>
                 </div>
               </div>
+            )}
+
+            {/* الدفع بالبطاقة: فوري ولا يحتاج مراجعة الأدمن */}
+            {settings.paymentGatewayEnabled && (
+              <section className="space-y-2 rounded-xl border-2 border-gold bg-gold/5 p-4" data-testid="pay-by-card">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-gray-900">
+                  <CreditCard className="h-4 w-4 text-gold-deep" /> ادفع بالبطاقة — فوري
+                </h3>
+                <p className="text-xs leading-relaxed text-gray-700">
+                  مدى أو فيزا أو ماستركارد أو Apple Pay. يفتح الإرسال فور نجاح الدفع بلا انتظار مراجعة.
+                </p>
+                <Button
+                  type="button"
+                  onClick={() => void payByCard()}
+                  disabled={busy}
+                  className="h-auto w-full bg-ink py-3 text-base font-bold text-gold-light hover:bg-ink-soft"
+                  data-testid="pay-by-card-button"
+                >
+                  {busy ? (
+                    <Loader2 className="ml-2 h-5 w-5 animate-spin" />
+                  ) : (
+                    <CreditCard className="ml-2 h-5 w-5" />
+                  )}
+                  ادفع {formatFee(amount, currency)} بالبطاقة
+                </Button>
+              </section>
+            )}
+
+            {settings.paymentGatewayEnabled && (
+              <p className="text-center text-xs text-gray-500">أو حوّل بنكياً وارفع الإثبات</p>
             )}
 
             <section className="space-y-2 rounded-xl border border-line p-4">
