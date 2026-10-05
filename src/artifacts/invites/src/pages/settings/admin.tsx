@@ -27,7 +27,6 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import {
-  useAdminSetFreeLimit,
   useAdminSetPlan,
   useCreateTemplate,
   useDeleteTemplate,
@@ -103,7 +102,7 @@ interface UserDraft {
  * داخل قاعدة البيانات، فالواجهة ليست خط الحماية.
  */
 export type AdminCardId =
-  | "stats" | "profile" | "security" | "users" | "plans" | "send-fee" | "templates"
+  | "stats" | "profile" | "security" | "users" | "send-fee" | "templates"
   | "invites" | "notifications" | "announcements" | "site" | "support" | "content" | "session";
 
 interface AdminSettingsProps {
@@ -129,7 +128,6 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
   const updateSettings = useUpdateAppSettings();
   const updateAdminUser = useUpdateAdminUser();
   const setPlan = useAdminSetPlan();
-  const setFreeLimit = useAdminSetFreeLimit();
   const createTemplate = useCreateTemplate();
   const updateTemplate = useUpdateTemplate();
   const deleteTemplate = useDeleteTemplate();
@@ -140,8 +138,6 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
   const [visibleUsers, setVisibleUsers] = useState(10);
   const [drafts, setDrafts] = useState<Record<string, UserDraft>>({});
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
-  const [freeLimitInput, setFreeLimitInput] = useState("1");
-  const [applyToExisting, setApplyToExisting] = useState(false);
   const [confirmTemplateId, setConfirmTemplateId] = useState<number | null>(null);
   const [newTemplate, setNewTemplate] = useState({ name: "", category: "general", previewImage: "" });
   const [signingOut, setSigningOut] = useState(false);
@@ -149,7 +145,6 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
   useEffect(() => { setName(me.name); }, [me.name]);
   useEffect(() => { if (settings) setForm(settings); }, [settings]);
   useEffect(() => {
-    if (settings) setFreeLimitInput(String(settings.freeEventsLimit));
   }, [settings]);
 
   const setField = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
@@ -218,28 +213,6 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
     } finally {
       setSavingUserId(null);
     }
-  };
-
-  const applyFreeLimit = () => {
-    const limit = Number(freeLimitInput);
-    if (!Number.isFinite(limit) || limit < 0 || limit > 1000) {
-      toast({ title: "أدخل رقماً بين 0 و1000", variant: "destructive" });
-      return;
-    }
-    setFreeLimit.mutate(
-      { limit, applyExisting: applyToExisting },
-      {
-        onSuccess: (affected) =>
-          toast({
-            title: "تم تحديث حد الباقة المجانية",
-            description: applyToExisting
-              ? "طُبّق على " + affected + " حساباً مجانياً قائماً."
-              : "سيُطبَّق على الحسابات الجديدة فقط.",
-          }),
-        onError: (error: Error) =>
-          toast({ title: "تعذّر التحديث", description: error.message, variant: "destructive" }),
-      },
-    );
   };
 
   const toggleTemplateActive = (id: number, active: boolean) => {
@@ -538,101 +511,24 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
           ) : null}
         </SettingsCard>
         )}
-        {show("plans") && (
-        <SettingsCard
-          id="plans"
-          icon={CreditCard}
-          title="إدارة الباقات والاشتراكات"
-          description="حد المناسبات للباقة المجانية وبيانات الباقة المدفوعة."
-        >
-          <FieldRow
-            label="حد المناسبات في الباقة المجانية"
-            htmlFor="free-limit"
-            hint="يُطبَّق على الحسابات الجديدة، ويمكنك تطبيقه على الحسابات المجانية القائمة أيضاً."
-          >
-            <Input
-              id="free-limit"
-              type="number"
-              inputMode="numeric"
-              min={0}
-              max={1000}
-              dir="ltr"
-              value={freeLimitInput}
-              onChange={(event) => setFreeLimitInput(event.target.value)}
-            />
-          </FieldRow>
-          <ToggleRow
-            label="تطبيق الحد على الحسابات المجانية القائمة"
-            description="يعدّل حد المناسبات لكل حساب مجاني موجود الآن."
-            checked={applyToExisting}
-            onCheckedChange={setApplyToExisting}
-          />
-          <SaveBar
-            pending={setFreeLimit.isPending}
-            disabled={freeLimitInput === String(form.freeEventsLimit) && !applyToExisting}
-            onSave={applyFreeLimit}
-            label="تحديث الحد"
-          />
-
-          <div className="pt-4 border-t border-gray-100 space-y-5">
-            <div className="grid grid-cols-2 gap-3">
-              <FieldRow label="سعر الباقة المدفوعة (ريال)" htmlFor="paid-price">
-                <Input
-                  id="paid-price"
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  dir="ltr"
-                  value={String(form.paidPlanPrice)}
-                  onChange={(event) => setField("paidPlanPrice", Number(event.target.value))}
-                />
-              </FieldRow>
-              <FieldRow label="مدة الباقة بالأشهر" htmlFor="paid-months">
-                <Input
-                  id="paid-months"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={120}
-                  dir="ltr"
-                  value={String(form.paidPlanMonths)}
-                  onChange={(event) => setField("paidPlanMonths", Number(event.target.value))}
-                />
-              </FieldRow>
-            </div>
-            <SaveBar
-              pending={updateSettings.isPending}
-              onSave={() => saveSettings(["paidPlanPrice", "paidPlanMonths"], "تم حفظ بيانات الباقة")}
-              label="حفظ بيانات الباقة"
-              note="السعر يظهر في صفحة الباقات للمستخدمين."
-            />
-          </div>
-        </SettingsCard>
-        )}
-
         {show("send-fee") && (
         <SettingsCard
           id="send-fee"
           icon={Banknote}
           title="رسوم إرسال الدعوات"
-          description="المبلغ الذي يدفعه المستخدم مرة واحدة لكل مناسبة قبل الإرسال النهائي. اتركه 0 ليكون الإرسال مجانياً بلا شاشة دفع."
+          description="السعر تراكمي: الأساس + ما يضيفه العميل من مزايا. اترك الكل 0 ليكون الإرسال مجانياً بلا شاشة دفع."
         >
           <div className="grid grid-cols-2 gap-3">
             <FieldRow
-              label="مبلغ الرسوم (ريال)"
-              htmlFor="send-fee-amount"
-              hint="يظهر للمستخدم بوضوح قبل الدفع. تغييره لا يؤثر على العمليات القائمة."
+              label="الأساس (ريال)"
+              htmlFor="fee-base"
+              hint="لكل مناسبة. أقل من 5 لا يقبله الدفع بالبطاقة — الحد الأدنى لفاتورة بيلينك."
             >
               <Input
-                id="send-fee-amount"
-                type="number"
-                inputMode="decimal"
-                min={0}
-                max={100000}
-                step="0.01"
-                dir="ltr"
-                value={String(form.sendFeeAmount)}
-                onChange={(event) => setField("sendFeeAmount", Math.max(0, Number(event.target.value) || 0))}
+                id="fee-base"
+                type="number" inputMode="decimal" min={0} max={100000} step="0.01" dir="ltr"
+                value={String(form.feeBaseAmount)}
+                onChange={(event) => setField("feeBaseAmount", Math.max(0, Number(event.target.value) || 0))}
               />
             </FieldRow>
             <FieldRow label="العملة" htmlFor="send-fee-currency">
@@ -645,14 +541,51 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
               />
             </FieldRow>
           </div>
+          <div className="grid grid-cols-3 gap-3">
+            <FieldRow label="+ صورة الغلاف" htmlFor="fee-cover">
+              <Input
+                id="fee-cover"
+                type="number" inputMode="decimal" min={0} max={100000} step="0.01" dir="ltr"
+                value={String(form.feeCoverImageAmount)}
+                onChange={(event) => setField("feeCoverImageAmount", Math.max(0, Number(event.target.value) || 0))}
+              />
+            </FieldRow>
+            <FieldRow label="+ التسجيل الصوتي" htmlFor="fee-audio">
+              <Input
+                id="fee-audio"
+                type="number" inputMode="decimal" min={0} max={100000} step="0.01" dir="ltr"
+                value={String(form.feeAudioAmount)}
+                onChange={(event) => setField("feeAudioAmount", Math.max(0, Number(event.target.value) || 0))}
+              />
+            </FieldRow>
+            <FieldRow label="+ القالب المميز" htmlFor="fee-template">
+              <Input
+                id="fee-template"
+                type="number" inputMode="decimal" min={0} max={100000} step="0.01" dir="ltr"
+                value={String(form.feeTemplateAmount)}
+                onChange={(event) => setField("feeTemplateAmount", Math.max(0, Number(event.target.value) || 0))}
+              />
+            </FieldRow>
+          </div>
+          <p className="text-xs text-gray-500 leading-relaxed" data-testid="fee-example">
+            مثال: مناسبة فيها صورة وتسجيل صوتي ={" "}
+            <span className="font-medium text-gray-800" dir="rtl">
+              {form.feeBaseAmount + form.feeCoverImageAmount + form.feeAudioAmount} {form.sendFeeCurrency === "SAR" ? "ريال" : form.sendFeeCurrency}
+            </span>
+          </p>
           <SaveBar
             pending={updateSettings.isPending}
-            onSave={() => saveSettings(["sendFeeAmount", "sendFeeCurrency"], "تم حفظ رسوم الإرسال")}
-            label="حفظ الرسوم"
+            onSave={() =>
+              saveSettings(
+                ["feeBaseAmount", "feeCoverImageAmount", "feeAudioAmount", "feeTemplateAmount", "sendFeeCurrency"],
+                "تم حفظ الأسعار",
+              )
+            }
+            label="حفظ الأسعار"
             note={
-              form.sendFeeAmount > 0
-                ? "الإرسال مقفل لكل مناسبة حتى تدفع رسومها وتوافق عليها الإدارة."
-                : "الرسوم صفر: الإرسال مفتوح للجميع بلا شاشة دفع."
+              form.feeBaseAmount > 0
+                ? "الإرسال مقفل لكل مناسبة حتى يُسدَّد مبلغها كاملاً. من أضاف ميزة مسعَّرة بعد الدفع يُطالَب بالفرق."
+                : "الأساس صفر: الإرسال مفتوح بلا شاشة دفع ما لم تُسعَّر ميزة أخرى."
             }
           />
 
