@@ -83,12 +83,16 @@ function authFailureResponse(err: unknown): Response {
   const msg = err instanceof Error ? err.message : String(err);
   const status = Number((msg.match(/^PAYLINK_AUTH_FAILED:(\d+)/) ?? [])[1] ?? 0);
   if (status === 401 || status === 403) {
+    // التفصيل التقني (أسماء المتغيرات) في سجلات Cloudflare فقط — العميل يرى سبباً
+    // مفهوماً بلا أي اسم متغير أو مفتاح.
+    console.error(
+      "paylink credentials rejected — update PAYLINK_API_ID / PAYLINK_SECRET_KEY in Cloudflare to match my.paylink.sa/private/api-keys",
+    );
     return jsonResponse(
       {
         ok: false,
         code: "GATEWAY_AUTH",
-        message:
-          "بوابة الدفع رفضت مفاتيح الربط — راجعي PAYLINK_API_ID وPAYLINK_SECRET_KEY في Cloudflare لتطابق صفحة مفاتيح بيلينك.",
+        message: "تعذر بدء الدفع بالبطاقة — إعداد بوابة الدفع يحتاج مراجعة من الإدارة. حاول لاحقاً أو تواصل مع الدعم.",
       },
       502,
     );
