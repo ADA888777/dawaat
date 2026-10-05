@@ -115,11 +115,15 @@ async function addInvoice(
     headers: { ...JSON_HEADERS, authorization: "Bearer " + token },
     body: JSON.stringify(body),
   });
-  const data = (await res.json().catch(() => null)) as
-    | { url?: string; transactionNo?: string; success?: boolean }
-    | null;
+  const raw = await res.text().catch(() => "");
+  let data: { url?: string; transactionNo?: string; success?: boolean; detail?: string; message?: string } | null = null;
+  try { data = JSON.parse(raw); } catch { data = null; }
   if (!res.ok || !data?.url || !data?.transactionNo) {
-    throw new Error("PAYLINK_INVOICE_FAILED");
+    // سبب بيلينك (مثل «تجاوزت الحد الشهري المسموح به … 0 ريال» لحساب لم يُفعَّل بعد)
+    // يُسجَّل للإدارة فقط — بلا مفاتيح ولا رمز الجلسة.
+    const reason = String(data?.detail ?? data?.message ?? raw).slice(0, 300);
+    console.error("paylink addInvoice failed", { status: res.status, reason });
+    throw new Error("PAYLINK_INVOICE_FAILED:" + res.status);
   }
   return { url: String(data.url), transactionNo: String(data.transactionNo) };
 }
@@ -286,7 +290,19 @@ export async function handlePayCreate(
         },
       ],
     });
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    // 406 من بيلينك = حساب التاجر غير مفعّل للعمليات بعد (حد شهري 0) — ليس عطلاً عابراً
+    if (/:406$/.test(msg)) {
+      return jsonResponse(
+        {
+          ok: false,
+          code: "GATEWAY_NOT_ACTIVE",
+          message: "الدفع بالبطاقة غير متاح مؤقتاً لهذا الموقع. تواصل مع الدعم لإتمام الدفع.",
+        },
+        502,
+      );
+    }
     return jsonResponse({ ok: false, code: "GATEWAY_UNAVAILABLE", message: "تعذر إنشاء فاتورة الدفع. حاول مرة أخرى." }, 502);
   }
 
