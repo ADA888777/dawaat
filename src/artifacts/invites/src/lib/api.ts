@@ -1188,6 +1188,8 @@ export interface AppSettings {
   paymentGatewayName: string;
   /** أقل مبلغ تقبله البوابة — بيلينك ٥، ميسر ١ */
   paymentGatewayMinAmount: number;
+  /** رابط صفحة دفع جاهز من أي مزوّد — فارغ = الميزة مطفأة، والقبول يدوي دائماً */
+  paymentLinkUrl: string;
 }
 
 export type FeatureKey =
@@ -1272,6 +1274,7 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   paymentGatewayEnabled: "payment_gateway_enabled",
   paymentGatewayName: "payment_gateway_name",
   paymentGatewayMinAmount: "payment_gateway_min_amount",
+  paymentLinkUrl: "payment_link_url",
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -1314,6 +1317,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   paymentGatewayEnabled: false,
   paymentGatewayName: "بيلينك",
   paymentGatewayMinAmount: 5,
+  paymentLinkUrl: "",
 };
 
 export const getGetAppSettingsQueryKey = () => ["app-settings"] as const;
