@@ -625,11 +625,26 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
                 />
               </FieldRow>
             </div>
+            <FieldRow
+              label="رابط صفحة دفع جاهز (اختياري)"
+              htmlFor="payment-link-url"
+              hint="لأي مزوّد يعطيك رابط دفع ثابتاً قبل ربط الـ API أو بدلاً منه. يظهر للعميل زر يفتح الرابط، والقبول يبقى يدوياً من تبويب المدفوعات. اتركيه فارغاً لإخفائه."
+            >
+              <Input
+                id="payment-link-url"
+                dir="ltr"
+                type="url"
+                maxLength={500}
+                value={form.paymentLinkUrl}
+                onChange={(event) => setField("paymentLinkUrl", event.target.value.trim())}
+                placeholder="https://..."
+              />
+            </FieldRow>
             <SaveBar
               pending={updateSettings.isPending}
               onSave={() =>
                 saveSettings(
-                  ["paymentGatewayEnabled", "paymentGatewayName", "paymentGatewayMinAmount"],
+                  ["paymentGatewayEnabled", "paymentGatewayName", "paymentGatewayMinAmount", "paymentLinkUrl"],
                   "تم حفظ إعداد بوابة الدفع",
                 )
               }
