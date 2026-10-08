@@ -591,14 +591,48 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
 
           <div className="pt-4 border-t border-gray-100 space-y-4">
             <ToggleRow
-              label="الدفع بالبطاقة (بوابة بيلينك)"
-              description="يظهر للعميل زر «ادفع بالبطاقة» ويُفتح الإرسال فور نجاح الدفع بلا مراجعة. يتطلب ضبط مفاتيح بيلينك في Cloudflare."
+              label="الدفع بالبطاقة"
+              description="يظهر للعميل زر «ادفع بالبطاقة» ويُفتح الإرسال فور نجاح الدفع بلا مراجعة. يتطلب ضبط مفاتيح المزوّد في Cloudflare."
               checked={form.paymentGatewayEnabled}
               onCheckedChange={(value) => setField("paymentGatewayEnabled", value)}
             />
+            <div className="grid grid-cols-2 gap-3">
+              <FieldRow
+                label="اسم المزوّد كما يظهر للعميل"
+                htmlFor="gateway-name"
+                hint="مثل: بيلينك أو ميسر. يظهر في شاشة الدفع فقط."
+              >
+                <Input
+                  id="gateway-name"
+                  maxLength={40}
+                  value={form.paymentGatewayName}
+                  onChange={(event) => setField("paymentGatewayName", event.target.value)}
+                  placeholder="ميسر"
+                />
+              </FieldRow>
+              <FieldRow
+                label="أقل مبلغ يقبله المزوّد"
+                htmlFor="gateway-min"
+                hint="بيلينك ٥ ريالات، ميسر ريال واحد. دونه يُعرض التحويل البنكي وحده."
+              >
+                <Input
+                  id="gateway-min"
+                  type="number" inputMode="decimal" min={0} max={100000} step="0.01" dir="ltr"
+                  value={String(form.paymentGatewayMinAmount)}
+                  onChange={(event) =>
+                    setField("paymentGatewayMinAmount", Math.max(0, Number(event.target.value) || 0))
+                  }
+                />
+              </FieldRow>
+            </div>
             <SaveBar
               pending={updateSettings.isPending}
-              onSave={() => saveSettings(["paymentGatewayEnabled"], "تم حفظ إعداد بوابة الدفع")}
+              onSave={() =>
+                saveSettings(
+                  ["paymentGatewayEnabled", "paymentGatewayName", "paymentGatewayMinAmount"],
+                  "تم حفظ إعداد بوابة الدفع",
+                )
+              }
               label="حفظ البوابة"
               note={
                 form.paymentGatewayEnabled
