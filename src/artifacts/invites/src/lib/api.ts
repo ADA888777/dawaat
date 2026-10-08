@@ -1186,6 +1186,8 @@ export interface AppSettings {
   iosShortcutUrl: string;
   paymentGatewayEnabled: boolean;
   paymentGatewayName: string;
+  /** أقل مبلغ تقبله البوابة — بيلينك ٥، ميسر ١ */
+  paymentGatewayMinAmount: number;
 }
 
 export type FeatureKey =
@@ -1269,6 +1271,7 @@ const APP_SETTINGS_COLUMNS: Record<keyof AppSettings, string> = {
   iosShortcutUrl: "ios_shortcut_url",
   paymentGatewayEnabled: "payment_gateway_enabled",
   paymentGatewayName: "payment_gateway_name",
+  paymentGatewayMinAmount: "payment_gateway_min_amount",
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -1310,6 +1313,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   iosShortcutUrl: "",
   paymentGatewayEnabled: false,
   paymentGatewayName: "بيلينك",
+  paymentGatewayMinAmount: 5,
 };
 
 export const getGetAppSettingsQueryKey = () => ["app-settings"] as const;
