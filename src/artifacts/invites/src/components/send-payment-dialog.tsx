@@ -52,9 +52,6 @@ interface SendPaymentDialogProps {
   onContinue: () => void;
 }
 
-/** الحد الأدنى لفاتورة بوابة بيلينك — أقل منه ترفضه البوابة نفسها */
-const GATEWAY_MIN_AMOUNT = 5;
-
 /** 150 → «150 ريال»، 150.5 → «150.50 ريال» */
 export function formatFee(amount: number, currency: string): string {
   const value = Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
@@ -160,7 +157,11 @@ export function SendPaymentDialog({
   // البطاقة هي المسار الأساسي متى كانت البوابة مفعّلة والمبلغ يقبله بيلينك.
   // التحويل البنكي يبقى بديلاً مطويّاً لا يراه العميل إلا إن طلبه، أو إن كان
   // المبلغ أقل من حد البوابة، أو إن كانت البوابة معطّلة.
-  const cardIsPrimary = settings.paymentGatewayEnabled && amount >= GATEWAY_MIN_AMOUNT;
+  // الحد الأدنى يأتي من الإعدادات لأنه يختلف بحسب البوابة (بيلينك ٥، ميسر ١)
+  const gatewayMin = settings.paymentGatewayMinAmount > 0 ? settings.paymentGatewayMinAmount : 5;
+  // اسم البوابة من الإعدادات — تغيير المزوّد لا يتطلب تعديل الشيفرة
+  const gatewayName = settings.paymentGatewayName.trim() || "بوابة الدفع";
+  const cardIsPrimary = settings.paymentGatewayEnabled && amount >= gatewayMin;
   const [showBank, setShowBank] = useState(false);
   useEffect(() => {
     if (!open) setShowBank(false);
@@ -383,21 +384,21 @@ export function SendPaymentDialog({
             )}
 
             {/* مبلغ أقل من حد البوابة لا يمكن دفعه بالبطاقة — نقولها بدل زر يفشل */}
-            {settings.paymentGatewayEnabled && amount > 0 && amount < GATEWAY_MIN_AMOUNT && (
+            {settings.paymentGatewayEnabled && amount > 0 && amount < gatewayMin && (
               <p className="rounded-xl border border-line bg-cream-2 px-4 py-3 text-xs leading-relaxed text-gray-700">
-                الدفع بالبطاقة متاح من {formatFee(GATEWAY_MIN_AMOUNT, currency)} فأكثر، وهذا المبلغ أقل
+                الدفع بالبطاقة متاح من {formatFee(gatewayMin, currency)} فأكثر، وهذا المبلغ أقل
                 من ذلك — أكمله بالتحويل البنكي أدناه.
               </p>
             )}
 
             {/* الدفع بالبطاقة: فوري ولا يحتاج مراجعة الأدمن */}
-            {settings.paymentGatewayEnabled && amount >= GATEWAY_MIN_AMOUNT && (
+            {settings.paymentGatewayEnabled && amount >= gatewayMin && (
               <section className="space-y-2 rounded-xl border-2 border-gold bg-gold/5 p-4" data-testid="pay-by-card">
                 <h3 className="flex items-center gap-2 text-sm font-bold text-gray-900">
                   <CreditCard className="h-4 w-4 text-gold-deep" /> ادفع بالبطاقة — فوري
                 </h3>
                 <p className="text-xs leading-relaxed text-gray-700">
-                  مدى أو فيزا أو ماستركارد أو Apple Pay عبر صفحة بيلينك الآمنة. يُفتح الإرسال فور
+                  مدى أو فيزا أو ماستركارد أو Apple Pay عبر صفحة {gatewayName} الآمنة. يُفتح الإرسال فور
                   تأكيد الدفع — بلا رفع إثبات ولا انتظار مراجعة.
                 </p>
                 <Button
@@ -423,7 +424,7 @@ export function SendPaymentDialog({
                 data-testid="awaiting-gateway"
               >
                 <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                إن كنتَ أكملت الدفع للتو فسنتحقق منه مع بيلينك ونحدّث الحالة تلقائياً خلال لحظات.
+                إن كنتَ أكملت الدفع للتو فسنتحقق منه مع {gatewayName} ونحدّث الحالة تلقائياً خلال لحظات.
               </p>
             )}
 

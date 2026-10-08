@@ -5,10 +5,11 @@
  *   POST /api/contacts/import   ← يستقبل جهات الاتصال من اختصار الآيفون (Dawaat – Contacts)
  *                                  مع رمز الاستخدام الواحد، ويمرّرها إلى دالة قاعدة البيانات
  *                                  import_contacts_with_token التي تتحقق من الرمز وتُدخل المدعوين.
- *   POST /api/pay/create        ← ينشئ فاتورة في بوابة «بيلينك» ويعيد رابط الدفع
- *                                  (بجلسة المستخدم؛ التفاصيل في worker/paylink.ts).
+ *   POST /api/pay/create        ← ينشئ فاتورة في بوابة الدفع ويعيد رابط الدفع
+ *                                  (بجلسة المستخدم؛ التفاصيل في worker/paylink.ts
+ *                                  أو worker/moyasar.ts حسب PAYMENT_PROVIDER).
  *   GET  /api/pay/return        ← عودة العميل بعد الدفع: تحقق ثم تأكيد ثم تحويل للمناسبة.
- *   POST /api/pay/webhook       ← نداء خادم-لخادم من بيلينك لتأكيد الدفع.
+ *   POST /api/pay/webhook       ← نداء خادم-لخادم من البوابة لتأكيد الدفع.
  *   GET  /api/health            ← فحص جاهزية بسيط.
  *   أي مسار آخر                 ← الأصول الثابتة (تطبيق React) كما كان تماماً.
  *
@@ -19,17 +20,36 @@
  * التحقق الفعلي كله في قاعدة البيانات (الرمز المؤقت + RLS).
  */
 
-import {
-  handlePayCreate,
-  handlePayReturn,
-  handlePayWebhook,
-  type PaylinkEnv,
-} from "./paylink";
+import * as paylink from "./paylink";
+import * as moyasar from "./moyasar";
+import type { PaylinkEnv } from "./paylink";
+import type { MoyasarEnv } from "./moyasar";
 
-interface Env extends PaylinkEnv {
+interface Env extends PaylinkEnv, MoyasarEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
+  /** "moyasar" أو "paylink" — الافتراضي بيلينك حفاظاً على السلوك القائم */
+  PAYMENT_PROVIDER?: string;
+}
+
+/**
+ * اختيار البوابة من متغير تشغيل واحد في Cloudflare.
+ *
+ * كل بوابة تلتزم العقد نفسه (create / return / webhook) وتكتب في الجدول
+ * نفسه عبر attach_gateway_payment و confirm_gateway_payment، فالتبديل بينهما
+ * لا يمس قاعدة البيانات ولا الواجهة — متغيّر واحد ونشر.
+ *
+ * إن لم يُضبط المتغير نختار تلقائياً البوابة التي ضُبطت مفاتيحها، وبيلينك
+ * أولاً حتى لا يتغيّر سلوك الموقع القائم من تلقاء نفسه.
+ */
+function gatewayFor(env: Env) {
+  const chosen = (env.PAYMENT_PROVIDER ?? "").trim().toLowerCase();
+  if (chosen === "moyasar") return moyasar;
+  if (chosen === "paylink") return paylink;
+  if (paylink.paylinkConfigured(env)) return paylink;
+  if (moyasar.moyasarConfigured(env)) return moyasar;
+  return paylink;
 }
 
 const MAX_CONTACTS = 1000;
@@ -234,9 +254,10 @@ export default {
       if (!target) {
         return json({ ok: false, code: "NOT_CONFIGURED", message: "خدمة الدفع غير مهيأة على هذا النطاق." }, 503);
       }
-      if (pathname === "/api/pay/create") return handlePayCreate(request, env, target);
-      if (pathname === "/api/pay/return") return handlePayReturn(request, env, target);
-      return handlePayWebhook(request, env, target);
+      const gateway = gatewayFor(env);
+      if (pathname === "/api/pay/create") return gateway.handlePayCreate(request, env, target);
+      if (pathname === "/api/pay/return") return gateway.handlePayReturn(request, env, target);
+      return gateway.handlePayWebhook(request, env, target);
     }
 
     if (pathname === "/api/health") return json({ ok: true, service: "dawaat", time: new Date().toISOString() });

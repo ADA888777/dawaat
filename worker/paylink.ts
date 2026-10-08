@@ -20,7 +20,26 @@
  *     المصدر الوحيد هو getInvoice من بيلينك، والقاعدة تتحقق من تطابق المبلغ.
  */
 
-export interface PaylinkEnv {
+import {
+  type ConfirmOutcome,
+  type GatewayEnvBase,
+  type RemoteInvoice,
+  type SupabaseTarget,
+  JSON_HEADERS,
+  beginPayCreate,
+  bearerFrom,
+  confirmWithDb,
+  DB_ERRORS,
+  dbError,
+  jsonResponse,
+  returnRedirect,
+  rpc,
+} from "./gateway-common";
+
+export type { SupabaseTarget };
+export { jsonResponse };
+
+export interface PaylinkEnv extends GatewayEnvBase {
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
   /** restapi.paylink.sa للإنتاج، restpilot.paylink.sa للتجربة */
@@ -31,20 +50,7 @@ export interface PaylinkEnv {
   GATEWAY_SHARED_SECRET?: string;
 }
 
-export interface SupabaseTarget {
-  url: string;
-  anonKey: string;
-}
-
 const PROD_BASE = "https://restapi.paylink.sa";
-const JSON_HEADERS = { "content-type": "application/json", accept: "application/json" };
-
-export function jsonResponse(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...extra },
-  });
-}
 
 function paylinkBase(env: PaylinkEnv): string {
   return (env.PAYLINK_BASE || PROD_BASE).trim().replace(/\/$/, "");
@@ -153,55 +159,10 @@ async function getInvoice(env: PaylinkEnv, token: string, transactionNo: string)
 
 // ─────────────────────────── جسر قاعدة البيانات ───────────────────────────
 
-/** استدعاء دالة في القاعدة. userJwt موجود ⇒ تعمل بصلاحيات المستخدم نفسه. */
-async function rpc(
-  target: SupabaseTarget,
-  fn: string,
-  args: Record<string, unknown>,
-  userJwt?: string,
-): Promise<{ ok: boolean; status: number; data: unknown; message: string }> {
-  const res = await fetch(target.url + "/rest/v1/rpc/" + fn, {
-    method: "POST",
-    headers: {
-      apikey: target.anonKey,
-      authorization: "Bearer " + (userJwt || target.anonKey),
-      ...JSON_HEADERS,
-    },
-    body: JSON.stringify(args),
-  });
-  const text = await res.text();
-  let data: unknown = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = null;
-  }
-  const message = String((data as { message?: string } | null)?.message ?? "");
-  return { ok: res.ok, status: res.status, data, message };
-}
-
-function bearerFrom(request: Request): string {
-  const raw = request.headers.get("authorization") ?? "";
-  return /^Bearer\s+(.+)$/i.test(raw) ? raw.replace(/^Bearer\s+/i, "").trim() : "";
-}
-
-/** رسائل عربية لأخطاء القاعدة */
-const DB_ERRORS: Record<string, { status: number; message: string }> = {
-  AUTH_REQUIRED: { status: 401, message: "سجّل الدخول أولاً ثم أعد المحاولة." },
-  EVENT_NOT_FOUND: { status: 404, message: "المناسبة غير موجودة أو ليست لحسابك." },
-  PAYMENT_NOT_FOUND: { status: 404, message: "عملية الدفع غير موجودة." },
-  PAYMENT_NOT_EDITABLE: { status: 409, message: "هذه العملية لا يمكن تعديلها — حدّث الصفحة." },
-  AMOUNT_MISMATCH: { status: 409, message: "المبلغ المدفوع لا يطابق المطلوب." },
-  BAD_GATEWAY_SECRET: { status: 403, message: "تعذر تأكيد الدفع." },
-};
-
-function dbError(message: string): Response {
-  const code = Object.keys(DB_ERRORS).find((k) => message.includes(k));
-  if (code) return jsonResponse({ ok: false, code, message: DB_ERRORS[code].message }, DB_ERRORS[code].status);
-  return jsonResponse({ ok: false, code: "DB_ERROR", message: "تعذر إتمام العملية. حاول مرة أخرى." }, 502);
-}
-
 // ─────────────────────────── ١) إنشاء رابط الدفع ───────────────────────────
+
+/** بيلينك يرفض أي فاتورة أقل من 5 ريالات */
+export const PAYLINK_MIN_AMOUNT = 5;
 
 export async function handlePayCreate(
   request: Request,
@@ -218,46 +179,11 @@ export async function handlePayCreate(
     );
   }
 
-  const jwt = bearerFrom(request);
-  if (!jwt) return jsonResponse({ ok: false, code: "AUTH_REQUIRED", message: DB_ERRORS.AUTH_REQUIRED.message }, 401);
-
-  let body: { eventId?: unknown; clientName?: unknown; clientMobile?: unknown; clientEmail?: unknown };
-  try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return jsonResponse({ ok: false, code: "BAD_JSON", message: "صيغة الطلب غير صحيحة." }, 400);
-  }
-  const eventId = Number(body.eventId);
-  if (!Number.isInteger(eventId) || eventId <= 0) {
-    return jsonResponse({ ok: false, code: "BAD_EVENT", message: "المناسبة غير صحيحة." }, 400);
-  }
-
-  // ١ـأ عملية الدفع تُنشأ/تُجلب بجلسة المستخدم نفسه (RLS تحمي الملكية)
-  const created = await rpc(target, "request_event_payment", { p_event_id: eventId }, jwt);
-  if (!created.ok) return dbError(created.message);
-
-  const payment = (Array.isArray(created.data) ? created.data[0] : created.data) as {
-    id?: number;
-    amount?: number | string;
-    currency?: string;
-    status?: string;
-  } | null;
-  if (!payment?.id) {
-    return jsonResponse({ ok: false, code: "PAYMENT_NOT_FOUND", message: DB_ERRORS.PAYMENT_NOT_FOUND.message }, 404);
-  }
-
-  const amount = Number(payment.amount ?? 0);
-  // الرسوم صفر أو مدفوعة سلفاً: لا داعي لبوابة الدفع إطلاقاً
-  if (payment.status === "paid" || amount <= 0) {
-    return jsonResponse({ ok: true, alreadyPaid: true, paymentId: payment.id, eventId });
-  }
-  // بيلينك يرفض أقل من 5 ريال
-  if (amount < 5) {
-    return jsonResponse(
-      { ok: false, code: "AMOUNT_TOO_SMALL", message: "أقل مبلغ للدفع بالبطاقة 5 ريالات — استخدم التحويل البنكي." },
-      400,
-    );
-  }
+  // الجلسة والمناسبة وعملية الدفع والحد الأدنى — منطق مشترك بين البوابات
+  const begun = await beginPayCreate(request, target, PAYLINK_MIN_AMOUNT);
+  if ("done" in begun) return begun.done;
+  const { jwt, eventId, body, payment } = begun;
+  const amount = payment.amount;
 
   const origin = new URL(request.url).origin;
   const orderNumber = "DAWAAT-" + payment.id;
@@ -327,22 +253,12 @@ export async function handlePayCreate(
 
 // ──────────────────── ٢) التحقق والتأكيد (العودة والـ webhook) ────────────────────
 
-interface ConfirmOutcome {
-  ok: boolean;
-  paid: boolean;
-  eventId: number | null;
-  code?: string;
-}
-
 /** يتحقق من بيلينك مباشرة ثم يؤكد في القاعدة بالسر المشترك */
 async function verifyAndConfirm(
   env: PaylinkEnv,
   target: SupabaseTarget,
   transactionNo: string,
 ): Promise<ConfirmOutcome> {
-  const secret = (env.GATEWAY_SHARED_SECRET ?? "").trim();
-  if (!secret) return { ok: false, paid: false, eventId: null, code: "NO_SHARED_SECRET" };
-
   const token = await paylinkToken(env).catch(() => null);
   if (!token) return { ok: false, paid: false, eventId: null, code: "GATEWAY_UNAVAILABLE" };
 
@@ -353,23 +269,14 @@ async function verifyAndConfirm(
     return { ok: false, paid: false, eventId: null, code: "GATEWAY_UNAVAILABLE" };
   }
 
-  const paid = state.orderStatus.toLowerCase() === "paid";
-  // غير مدفوعة بعد (Pending): لا نغيّر شيئاً — قد يكمل الدفع لاحقاً
-  if (!paid && state.orderStatus.toLowerCase() !== "canceled") {
-    return { ok: true, paid: false, eventId: null, code: "PENDING" };
-  }
-
-  const res = await rpc(target, "confirm_gateway_payment", {
-    p_secret: secret,
-    p_provider_ref: transactionNo,
-    p_amount: state.amount,
-    p_paid: paid,
-  });
-  if (!res.ok) {
-    return { ok: false, paid: false, eventId: null, code: res.message || "DB_ERROR" };
-  }
-  const out = (res.data ?? {}) as { event_id?: number; status?: string };
-  return { ok: true, paid: out.status === "paid", eventId: Number(out.event_id) || null };
+  const status = state.orderStatus.toLowerCase();
+  const remote: RemoteInvoice = {
+    paid: status === "paid",
+    // غير مدفوعة ولا ملغاة: لا نغيّر شيئاً — قد يكمل الدفع لاحقاً
+    pending: status !== "paid" && status !== "canceled",
+    amount: Number(state.amount ?? 0),
+  };
+  return confirmWithDb(env, target, transactionNo, remote);
 }
 
 /** عودة العميل من صفحة الدفع */
@@ -386,16 +293,10 @@ export async function handlePayReturn(
     url.searchParams.get("orderNumber") ||
     "";
 
-  const redirect = (to: string) => Response.redirect(url.origin + to, 302);
-
-  if (!transactionNo) return redirect("/events?payment=unknown");
+  if (!transactionNo) return Response.redirect(url.origin + "/events?payment=unknown", 302);
 
   const outcome = await verifyAndConfirm(env, target, transactionNo);
-  if (!outcome.ok) return redirect("/events?payment=error");
-  if (!outcome.paid) {
-    return redirect(outcome.eventId ? "/events/" + outcome.eventId + "?payment=pending" : "/events?payment=pending");
-  }
-  return redirect(outcome.eventId ? "/events/" + outcome.eventId + "?payment=paid" : "/events?payment=paid");
+  return returnRedirect(request, outcome);
 }
 
 /** نداء خادم-لخادم من بيلينك — لا نثق بالحمولة، نتحقق بأنفسنا */
