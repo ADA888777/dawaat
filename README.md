@@ -36,7 +36,7 @@ dawaat/
 المسارات الداخلية للتطبيق (`/events/12` …) تُعاد لها `index.html` (سلوك SPA) كما في السابق.
 
 `wrangler.jsonc` يضبط `"run_worker_first": ["/api/*"]`. هذا **حاسم**: طلب التنقّل
-(`Sec-Fetch-Mode: navigate`) — مثل عودة العميل من صفحة بيلينك إلى `/api/pay/return` —
+(`Sec-Fetch-Mode: navigate`) — مثل عودة العميل من صفحة المزوّد إلى `/api/pay/return` —
 كانت طبقة الأصول تبتلعه وتعيد `index.html` بسلوك `not_found_handling` قبل أن يصل
 الـ Worker إطلاقاً، فلا يُؤكَّد الدفع أبداً. القاعدة محدودة بـ `/api/*` فلا تتأثر بقية الأصول.
 
@@ -126,60 +126,94 @@ src/supabase/migrations/0013_feature_pricing.sql
 - بوابة الدفع الإلكترونية (بيلينك) مربوطة عبر الأعمدة `method`/`provider`/`provider_ref`
   بنفس التدفق والحالات — انظر القسم التالي. التحويل البنكي يبقى كما هو بالتوازي.
 
-### بوابة الدفع «بيلينك» — الهجرة 0012
+### بوابة الدفع بالبطاقة — الهجرات 0012 و0014
 
 الدفع بالبطاقة (مدى/فيزا/ماستركارد/Apple Pay) بالتوازي مع التحويل البنكي، على نفس
 جدول `event_payments` ونفس الحالات، فلا تتغير لوحة المدفوعات ولا شرط فتح الإرسال.
 
-**التدفق**
+**مزوّدان بنفس العقد.** المنطق المشترك في `worker/gateway-common.ts`، وكل مزوّد ملف
+يصدّر نفس ثلاث الدوال (`handlePayCreate` / `handlePayReturn` / `handlePayWebhook`):
 
-1. العميل يضغط «ادفع بالبطاقة» في شاشة الدفع ← الموقع ينادي `POST /api/pay/create`
-   بجلسة المستخدم (`Authorization: Bearer <jwt>`).
+| | بيلينك `worker/paylink.ts` | ميسر `worker/moyasar.ts` |
+|---|---|---|
+| المصادقة | `/api/auth` ← رمز مؤقت | HTTP Basic بالمفتاح السري وكلمة مرور فارغة |
+| إنشاء الفاتورة | `POST /api/addInvoice` | `POST /v1/invoices` |
+| وحدة المبلغ | ريالات | **هللات** (عدد صحيح) |
+| الحد الأدنى | ٥ ريالات | **ريال واحد** |
+| التحقق | `GET /api/getInvoice/{no}` | `GET /v1/invoices/{id}` |
+| توقيع الإشعار | لا يوجد | لا يوجد — سر مشترك في جسم الطلب (`secret_token`) |
+
+الاختيار بمتغير `PAYMENT_PROVIDER` في Cloudflare (`paylink` أو `moyasar`). إن غاب،
+يُختار المزوّد المهيأ مفاتيحه. الحد الأدنى الذي **تعرضه الواجهة** يأتي من
+`app_settings.payment_gateway_min_amount` (الهجرة 0014)، وكل مزوّد يفرض حدّه بنفسه
+في الـ Worker أياً كان الإعداد.
+
+**التدفق** (واحد للمزوّدين)
+
+1. العميل يضغط «ادفع بالبطاقة» ← `POST /api/pay/create` بجلسة المستخدم
+   (`Authorization: Bearer <jwt>`).
 2. الـ Worker ينشئ/يجلب العملية بجلسة المستخدم عبر `request_event_payment`، ثم ينشئ
-   فاتورة في بيلينك (`/api/addInvoice`) ويربط `transactionNo` بالعملية عبر
-   `attach_gateway_payment`، ويعيد رابط صفحة الدفع. الحد الأدنى لمبلغ الفاتورة في
-   بيلينك **٥ ريالات**؛ أقل من ذلك يُرد بـ `AMOUNT_TOO_SMALL`.
+   فاتورة عند المزوّد ويربط رقمها بالعملية عبر `attach_gateway_payment`، ويعيد رابط
+   صفحة الدفع. المبلغ دون حد المزوّد يُرد بـ `AMOUNT_TOO_SMALL` قبل أي نداء خارجي.
 3. بعد الدفع يعود العميل إلى `GET /api/pay/return` (ثم يُحوَّل إلى
-   `/events/<id>?payment=paid|pending`)، ويستدعي بيلينك `POST /api/pay/webhook`
+   `/events/<id>?payment=paid|pending`)، ويستدعي المزوّد `POST /api/pay/webhook`
    خادماً لخادم.
-4. في الحالتين **يتحقق الـ Worker من بيلينك مباشرة** (`/api/getInvoice/{transactionNo}`)
-   ثم ينادي `confirm_gateway_payment` بالمبلغ الحقيقي.
+4. في الحالتين **يتحقق الـ Worker من المزوّد مباشرة** ثم ينادي
+   `confirm_gateway_payment` بالمبلغ الحقيقي كما أعاده المزوّد.
 
 **الأمان**
 
-- مفاتيح بيلينك لا تخرج من الـ Worker: الواجهة لا تعرف منها شيئاً.
+- مفاتيح المزوّد لا تخرج من الـ Worker: الواجهة لا تعرف منها شيئاً، ولا يظهر اسم أي
+  متغير بيئة في أي رسالة تصل للعميل — التفصيل التقني في `console.error` وحده.
 - لا يملك المتصفح ولا حمولة الـ webhook صلاحية تعليم عملية كـ«مدفوعة»:
   `confirm_gateway_payment` تتطلب سراً مشتركاً مخزّناً في `app_private.gateway_config`
   (لا صلاحية لـ `anon`/`authenticated` عليه ولا تعيده أي دالة)، فلا يكفي مفتاح
-  anon العام وحده. حالة الفاتورة ومبلغها يُقرآن من بيلينك لا من الطلب الوارد.
+  anon العام وحده. حالة الفاتورة ومبلغها يُقرآن من المزوّد لا من الطلب الوارد.
 - تطابق المبلغ مفروض في SQL (`AMOUNT_MISMATCH` إن قل عن المطلوب)، والتأكيد
-  **idempotent** فإعادة إرسال الـ webhook (حتى ١٠ مرات) لا تكرر شيئاً.
-- `/api/pay/webhook` يرد 503 عند فشل التحقق ليعيد بيلينك المحاولة، و200 عند النجاح.
+  **idempotent** فإعادة إرسال الـ webhook (١٠ مرات في بيلينك، ٥ في ميسر) لا تكرر شيئاً.
+- إشعار ميسر المسجَّل يُتحقَّق منه بمقارنة ثابتة الزمن على `secret_token`؛ وإشعار
+  `callback_url` للفاتورة لا يحمل سراً، فلا نأخذ منه إلا رقم الفاتورة ثم نسأل ميسر.
+- `/api/pay/webhook` يرد 503 عند فشل التحقق ليعيد المزوّد المحاولة، و200 عند النجاح.
 - لا يوجد أي مفتاح `service_role` في أي مكان.
+
+**أخطاء `/api/pay/create` كما يراها العميل** (الرسالة عربية دائماً وبلا تفاصيل تقنية)
+
+| الرمز | المعنى | ما تفعله الإدارة |
+|---|---|---|
+| `GATEWAY_NOT_CONFIGURED` | لا مفاتيح للمزوّد | أضف مفاتيح المزوّد في Cloudflare |
+| `GATEWAY_AUTH` | المفاتيح مرفوضة | حدّث المفاتيح من لوحة المزوّد |
+| `GATEWAY_NOT_ACTIVE` | الحساب لم يُفعَّل للمدفوعات الحقيقية | أكمل تفعيل الحساب عند المزوّد |
+| `AMOUNT_TOO_SMALL` | المبلغ دون حد المزوّد | ارفع الأسعار أو اكتفِ بالتحويل البنكي |
+| `GATEWAY_UNAVAILABLE` | خطأ آخر من المزوّد | راجع سجلات الـ Worker |
 
 **خطوات التشغيل (مرة واحدة)**
 
-1. **Supabase ← SQL Editor:** نفّذ `src/supabase/migrations/0012_paylink_gateway.sql`.
-2. وَلّد سراً مشتركاً عشوائياً (٣٢ حرفاً على الأقل)، مثلاً:
-   `openssl rand -hex 32`.
+1. **Supabase ← SQL Editor:** نفّذ `0012_paylink_gateway.sql` ثم
+   `0014_gateway_min_amount.sql` (كلتاهما آمنة لإعادة التنفيذ).
+2. وَلّد سراً مشتركاً عشوائياً (٣٢ حرفاً على الأقل): `openssl rand -hex 32`.
 3. **Cloudflare ← Workers ← dawaat ← Settings ← Variables and Secrets** — أضفها
    كـ **Secret** (وليس Text):
 
    | المتغير | القيمة |
    |---|---|
-   | `PAYLINK_API_ID` | API ID من `my.paylink.sa/private/api-keys` |
-   | `PAYLINK_SECRET_KEY` | Secret Key من نفس الصفحة |
-   | `GATEWAY_SHARED_SECRET` | السر المشترك المولَّد في الخطوة ٢ |
-   | `PAYLINK_BASE` | اختياري — `https://restpilot.paylink.sa` للتجربة؛ الافتراضي الإنتاج |
+   | `GATEWAY_SHARED_SECRET` | السر المشترك المولَّد في الخطوة ٢ (للمزوّدين) |
+   | `PAYMENT_PROVIDER` | `moyasar` أو `paylink` |
+   | `MOYASAR_SECRET_KEY` | ميسر — `sk_test_…` للتجربة، `sk_live_…` بعد التفعيل |
+   | `MOYASAR_WEBHOOK_SECRET` | ميسر — نفس `secret_token` المسجَّل في لوحتهم |
+   | `PAYLINK_API_ID` | بيلينك — API ID من `my.paylink.sa/private/api-keys` |
+   | `PAYLINK_SECRET_KEY` | بيلينك — Secret Key من نفس الصفحة |
+   | `PAYLINK_BASE` | بيلينك — اختياري، `https://restpilot.paylink.sa` للتجربة |
 
 4. **Supabase ← SQL Editor** بحساب أدمن: `select public.set_gateway_secret('<نفس السر>');`
    (ترفض أقل من ٢٤ حرفاً، ولا تنفّذها إلا من حساب أدمن.)
-5. **بيلينك ← الإعدادات ← Payment Webhook URL:** `https://dawaatly.top/api/pay/webhook`
-6. **الموقع ← الإعدادات ← رسوم إرسال الدعوات:** فعّل «الدفع بالبطاقة (بوابة بيلينك)».
+5. **لوحة المزوّد ← Webhooks:** الرابط `https://dawaatly.top/api/pay/webhook`.
+   في ميسر: أضف Webhook وفعّل `payment_paid` و`payment_failed`، وضع نفس قيمة
+   `MOYASAR_WEBHOOK_SECRET` في خانة Secret Token.
+6. **الموقع ← الإعدادات ← رسوم إرسال الدعوات:** فعّل «الدفع بالبطاقة»، واكتب اسم
+   المزوّد كما يظهر للعميل، واضبط «أقل مبلغ يقبله المزوّد» (ميسر ١، بيلينك ٥).
 
-إن غاب `PAYLINK_API_ID`/`PAYLINK_SECRET_KEY` يرد `/api/pay/create` بـ 503
-`NOT_CONFIGURED`، وإن غاب `GATEWAY_SHARED_SECRET` لا يُؤكَّد أي دفع (يبقى `pending`)
-بدل أن يُعلَّم مدفوعاً بغير تحقق.
+إن غابت مفاتيح المزوّد يرد `/api/pay/create` بـ 503 `GATEWAY_NOT_CONFIGURED`، وإن غاب
+`GATEWAY_SHARED_SECRET` لا يُؤكَّد أي دفع (يبقى `pending`) بدل أن يُعلَّم مدفوعاً بغير تحقق.
 
 ### شريط الإعلانات — الهجرات 0007 و0009 و0010
 
