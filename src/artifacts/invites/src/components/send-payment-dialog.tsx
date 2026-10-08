@@ -161,6 +161,8 @@ export function SendPaymentDialog({
   const gatewayMin = settings.paymentGatewayMinAmount > 0 ? settings.paymentGatewayMinAmount : 5;
   // اسم البوابة من الإعدادات — تغيير المزوّد لا يتطلب تعديل الشيفرة
   const gatewayName = settings.paymentGatewayName.trim() || "بوابة الدفع";
+  // رابط دفع جاهز لأي مزوّد — يظهر فقط حين لا تكون بوابة الـ API هي المسار
+  const paymentLink = settings.paymentLinkUrl.trim();
   const cardIsPrimary = settings.paymentGatewayEnabled && amount >= gatewayMin;
   const [showBank, setShowBank] = useState(false);
   useEffect(() => {
@@ -426,6 +428,30 @@ export function SendPaymentDialog({
                 <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
                 إن كنتَ أكملت الدفع للتو فسنتحقق منه مع {gatewayName} ونحدّث الحالة تلقائياً خلال لحظات.
               </p>
+            )}
+
+            {/* رابط دفع جاهز من أي مزوّد: يفتح صفحة المزوّد، والقبول يدوي —
+                العودة من صفحة الدفع ليست إثباتاً، فالإثبات يُرفع بالأسفل كالتحويل */}
+            {!cardIsPrimary && paymentLink !== "" && amount > 0 && (
+              <section className="space-y-2 rounded-xl border-2 border-gold bg-gold/5 p-4" data-testid="pay-by-link">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-gray-900">
+                  <CreditCard className="h-4 w-4 text-gold-deep" /> ادفع بالبطاقة عبر صفحة الدفع
+                </h3>
+                <p className="text-xs leading-relaxed text-gray-700">
+                  تُفتح صفحة دفع آمنة لدى المزوّد. ادفع {formatFee(amount, currency)} بالضبط،
+                  ثم ارفع إيصال الدفع بالأسفل وتراجعه الإدارة لفتح الإرسال.
+                </p>
+                <a
+                  href={paymentLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex h-auto w-full items-center justify-center rounded-md bg-ink py-3 text-base font-bold text-gold-light hover:bg-ink-soft"
+                  data-testid="pay-by-link-button"
+                >
+                  <CreditCard className="ml-2 h-5 w-5" />
+                  ادفع {formatFee(amount, currency)} بالبطاقة
+                </a>
+              </section>
             )}
 
             {/* التحويل البنكي: مطويّ خلف رابط صغير عندما تكون البطاقة هي الأساس */}
