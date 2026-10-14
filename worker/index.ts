@@ -294,7 +294,7 @@ async function serveAssets(request: Request, env: Env): Promise<Response> {
   headers.set("cache-control", "no-cache");
   return new Response(request.method === "HEAD" ? null : index.body, { status: 200, headers });
 }
-إضافةإدفعبايإلىمختارالبوابة/**
+/**
  * Worker دعوات — واجهة API صغيرة أمام الأصول الثابتة للموقع.
  *
  * المسارات:
@@ -318,14 +318,16 @@ async function serveAssets(request: Request, env: Env): Promise<Response> {
 
 import * as paylink from "./paylink";
 import * as moyasar from "./moyasar";
+import * as edfapay from "./edfapay";
 import type { PaylinkEnv } from "./paylink";
 import type { MoyasarEnv } from "./moyasar";
+import type { EdfaPayEnv } from "./edfapay";
 
-interface Env extends PaylinkEnv, MoyasarEnv {
+interface Env extends PaylinkEnv, MoyasarEnv, EdfaPayEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
-  /** "moyasar" أو "paylink" — الافتراضي بيلينك حفاظاً على السلوك القائم */
+  /** "moyasar" أو "paylink" أو "edfapay" — الافتراضي بيلينك حفاظاً على السلوك القائم */
   PAYMENT_PROVIDER?: string;
 }
 
@@ -343,8 +345,10 @@ function gatewayFor(env: Env) {
   const chosen = (env.PAYMENT_PROVIDER ?? "").trim().toLowerCase();
   if (chosen === "moyasar") return moyasar;
   if (chosen === "paylink") return paylink;
+  if (chosen === "edfapay") return edfapay;
   if (paylink.paylinkConfigured(env)) return paylink;
   if (moyasar.moyasarConfigured(env)) return moyasar;
+  if (edfapay.edfapayConfigured(env)) return edfapay;
   return paylink;
 }
 
