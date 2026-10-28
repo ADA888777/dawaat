@@ -1,0 +1,79 @@
+# بناء تطبيق دعوات (Capacitor) تلقائياً — المنصتان تُولَّدان من الصفر بـ cap add
+# (مجلدا ios/ وandroid/ غير مرفوعين عمداً؛ الملحق والإعدادات هما المصدر):
+#   • أندرويد: APK تصحيحي موقّع بمفتاح debug — يُثبَّت مباشرة على أي جهاز أندرويد.
+#   • iOS: ‏App غير موقّع يُحزم كـ IPA — يوقَّع على جهازك بـ Sideloadly (من ويندوز)
+#     أو Xcode (من ماك) بحساب Apple ID مجاني؛ حساب المطور المدفوع للنشر فقط.
+# الناتجان يُحمَّلان من تبويب Actions ← تشغيلة «Mobile apps» ← Artifacts.
+name: Mobile apps
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ["mobile/**", ".github/workflows/mobile.yml"]
+  push:
+    branches: [main]
+    paths: ["mobile/**", ".github/workflows/mobile.yml"]
+
+jobs:
+  android-apk:
+    name: أندرويد — APK تصحيحي
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: mobile } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - name: تثبيت حزم Capacitor
+        run: npm ci
+      - name: توليد مشروع أندرويد (يربط ملحق جهات الاتصال تلقائياً)
+        run: npx cap add android
+      - name: بناء APK
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dawaat-android-debug-apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  ios-unsigned-ipa:
+    name: iOS — IPA غير موقّع
+    runs-on: macos-latest
+    defaults: { run: { working-directory: mobile } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: تثبيت حزم Capacitor
+        run: npm ci
+      - name: توليد مشروع iOS (يربط ملحق جهات الاتصال عبر SPM تلقائياً)
+        run: npx cap add ios
+      - name: إضافة الـ scheme المشترك (قالب Capacitor لا يولّده، وxcodebuild يحتاجه)
+        run: |
+          mkdir -p ios/App/App.xcodeproj/xcshareddata/xcschemes
+          cp ci/App.xcscheme ios/App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme
+      - name: بناء التطبيق بلا توقيع
+        working-directory: mobile/ios/App
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+      - name: تحزيم IPA
+        working-directory: mobile/ios/App
+        run: |
+          APP_PATH=$(find build/Build/Products -name "App.app" -type d | head -1)
+          test -n "$APP_PATH"
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry dawaat-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dawaat-ios-unsigned-ipa
+          path: mobile/ios/App/dawaat-unsigned.ipa
+          if-no-files-found: error
