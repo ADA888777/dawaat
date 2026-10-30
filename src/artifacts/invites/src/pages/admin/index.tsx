@@ -1,5 +1,6 @@
 import { AppLayout } from "@/components/layout/app-layout";
-import { useGetMe, useGetAdminStats, useListAdminEvents, useListTemplates, useCreateTemplate, useUpdateTemplate, useDeleteTemplate, useDeleteAdminEvent, useGetAppSettings, useListAdminPayments } from "@/lib/api";
+import { useGetMe, useGetAdminStats, useListAdminEvents, useListTemplates, useCreateTemplate, useUpdateTemplate, useDeleteTemplate, useDeleteAdminEvent, useGetAppSettings, useListAdminPayments, EVENT_CATEGORIES, categoryLabel, type EventCategory } from "@/lib/api";
+import { AnnouncementImageField } from "@/components/announcement-image-field";
 import AdminSettings, { type AdminCardId } from "../settings/admin";
 import { AnnouncementsCard } from "../settings/announcements-card";
 import { FeaturesCard } from "./features-card";
@@ -179,9 +180,10 @@ function AdminTemplates() {
   
   const [formData, setFormData] = useState({
     name: "",
-    category: "general" as const,
+    category: "general" as EventCategory,
     previewImage: "",
-    active: true
+    active: true,
+    sortOrder: 0,
   });
 
   const handleOpenForm = (template?: any) => {
@@ -191,7 +193,8 @@ function AdminTemplates() {
         name: template.name,
         category: template.category,
         previewImage: template.previewImage,
-        active: template.active
+        active: template.active,
+        sortOrder: template.sortOrder ?? 0,
       });
     } else {
       setEditingId(null);
@@ -199,7 +202,9 @@ function AdminTemplates() {
         name: "",
         category: "general",
         previewImage: "",
-        active: true
+        active: true,
+        // القالب الجديد يُعرض بعد الموجود، فيأخذ رقماً أكبر من أعلى ترتيب حالي
+        sortOrder: Math.max(0, ...(templates ?? []).map((t) => t.sortOrder ?? 0)) + 1,
       });
     }
     setIsFormOpen(true);
@@ -264,25 +269,39 @@ function AdminTemplates() {
               <Select value={formData.category} onValueChange={(v: any) => setFormData({...formData, category: v})}>
                 <SelectTrigger dir="rtl"><SelectValue /></SelectTrigger>
                 <SelectContent dir="rtl">
-                  <SelectItem value="wedding">زفاف</SelectItem>
-                  <SelectItem value="engagement">خطوبة</SelectItem>
-                  <SelectItem value="graduation">تخرج</SelectItem>
-                  <SelectItem value="birthday">ميلاد</SelectItem>
-                  <SelectItem value="meeting">اجتماع</SelectItem>
-                  <SelectItem value="general">عام</SelectItem>
+                  {EVENT_CATEGORIES.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium mb-1 block">رابط الصورة (Preview URL)</label>
-              <Input value={formData.previewImage} onChange={e => setFormData({...formData, previewImage: e.target.value})} required dir="ltr" />
+              <label className="text-sm font-medium mb-1 block">تصميم القالب</label>
+              <AnnouncementImageField
+                variant="template"
+                bucket="template-images"
+                testId="template-image"
+                value={formData.previewImage}
+                onChange={(url) => setFormData({ ...formData, previewImage: url })}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-1 block">ترتيب الظهور</label>
+              <Input
+                type="number"
+                min={0}
+                dir="ltr"
+                value={formData.sortOrder}
+                onChange={e => setFormData({ ...formData, sortOrder: Number(e.target.value) || 0 })}
+              />
+              <p className="text-[11px] text-gray-500 mt-1">الأصغر يظهر أولاً. اترك ٠ ليأخذ ترتيبه الافتراضي.</p>
             </div>
             <div className="flex items-center gap-2 mt-4">
               <input type="checkbox" id="active" checked={formData.active} onChange={e => setFormData({...formData, active: e.target.checked})} className="w-4 h-4 text-gold" />
               <label htmlFor="active" className="text-sm font-medium">مفعل (يظهر للمستخدمين)</label>
             </div>
             <DialogFooter className="mt-6">
-              <Button type="submit" disabled={createTemplate.isPending || updateTemplate.isPending} className="bg-ink text-gold-light hover:bg-ink-soft w-full">
+              <Button type="submit" disabled={createTemplate.isPending || updateTemplate.isPending || !formData.previewImage} className="bg-ink text-gold-light hover:bg-ink-soft w-full">
                 {(createTemplate.isPending || updateTemplate.isPending) ? <Loader2 className="w-4 h-4 animate-spin" /> : 'حفظ'}
               </Button>
             </DialogFooter>
@@ -298,10 +317,13 @@ function AdminTemplates() {
             <div key={t.id} className={`border rounded-lg overflow-hidden ${t.active ? 'border-gray-200' : 'border-red-200 opacity-70'}`}>
               <img src={t.previewImage} alt={t.name} className="w-full aspect-[3/4] object-cover bg-gray-100" />
               <div className="p-3 bg-gray-50 border-t border-gray-200">
-                <div className="flex justify-between items-center mb-2">
+                <div className="flex justify-between items-center mb-1 gap-2">
                   <span className="font-bold text-sm text-gray-900 truncate">{t.name}</span>
-                  {!t.active && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded">معطل</span>}
+                  {!t.active && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded shrink-0">مخفي</span>}
                 </div>
+                <p className="text-[11px] text-gray-500 mb-2">
+                  {categoryLabel(t.category)} · ترتيب {t.sortOrder ?? 0}
+                </p>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="flex-1 h-8 text-xs" onClick={() => handleOpenForm(t)}>
                     تعديل
