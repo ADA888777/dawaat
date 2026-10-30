@@ -13,7 +13,30 @@ import { useAuth } from "./auth";
 
 // ---------------- الأنواع ----------------
 export type EventCategory =
-  | "wedding" | "engagement" | "birthday" | "graduation" | "meeting" | "general";
+  | "wedding" | "engagement" | "birthday" | "graduation" | "meeting"
+  | "congratulation" | "condolence" | "promotion" | "general";
+
+/**
+ * مصدر واحد لأسماء التصنيفات في كل الواجهة. إضافة تصنيف جديد تتم هنا فقط،
+ * بعد إضافة قيمته إلى نوع event_category في قاعدة البيانات (هجرة 0016).
+ * الترتيب هنا هو ترتيب ظهورها للمستخدم.
+ */
+export const EVENT_CATEGORIES: { value: EventCategory; label: string }[] = [
+  { value: "wedding", label: "زفاف" },
+  { value: "engagement", label: "خطوبة" },
+  { value: "graduation", label: "تخرج" },
+  { value: "birthday", label: "ميلاد" },
+  { value: "congratulation", label: "تهنئة" },
+  { value: "condolence", label: "عزاء" },
+  { value: "promotion", label: "ترقية" },
+  { value: "meeting", label: "اجتماع" },
+  { value: "general", label: "عام" },
+];
+
+/** اسم التصنيف بالعربية، ويُعيد القيمة الخام لو كان تصنيفاً غير معروف. */
+export function categoryLabel(value: EventCategory): string {
+  return EVENT_CATEGORIES.find((item) => item.value === value)?.label ?? value;
+}
 export type AttendanceStatus = "pending" | "attending" | "maybe" | "declined";
 /** حالة تجهيز/إرسال الدعوة — مستقلة عن رد المدعو */
 export type InviteStatus = "pending" | "prepared" | "sent" | "no_response";
@@ -47,6 +70,8 @@ export interface Template {
   category: EventCategory;
   previewImage: string;
   active: boolean;
+  /** ترتيب الظهور للمستخدم — الأصغر أولاً، ثم الأقدم عند التساوي */
+  sortOrder: number;
 }
 
 export interface EventRecord {
@@ -119,7 +144,7 @@ interface GuestRow {
 }
 interface TemplateRow {
   id: number; name: string; category: EventCategory;
-  preview_image: string; active: boolean;
+  preview_image: string; active: boolean; sort_order?: number;
 }
 interface ProfileRow {
   id: string; name: string; email: string; role: "user" | "admin";
@@ -178,6 +203,7 @@ function mapTemplate(row: TemplateRow): Template {
     category: row.category,
     previewImage: row.preview_image,
     active: row.active,
+    sortOrder: row.sort_order ?? 0,
   };
 }
 
@@ -262,7 +288,10 @@ export function useListTemplates(params?: { includeInactive?: boolean }) {
   return useQuery({
     queryKey: getListTemplatesQueryKey(params),
     queryFn: async (): Promise<Template[]> => {
-      let q = supabase.from("templates").select("*").order("id");
+      // الترتيب الذي تضبطه الإدارة أولاً، ثم الأقدم فالأحدث عند التساوي
+      let q = supabase.from("templates").select("*")
+        .order("sort_order", { ascending: true })
+        .order("id", { ascending: true });
       if (!params?.includeInactive) q = q.eq("active", true);
       const { data, error } = await q;
       throwIf(error);
@@ -274,10 +303,11 @@ export function useListTemplates(params?: { includeInactive?: boolean }) {
 export function useCreateTemplate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ data }: { data: { name: string; category: EventCategory; previewImage: string; active: boolean } }) => {
+    mutationFn: async ({ data }: { data: { name: string; category: EventCategory; previewImage: string; active: boolean; sortOrder?: number } }) => {
       const { error } = await supabase.from("templates").insert({
         name: data.name, category: data.category,
         preview_image: data.previewImage, active: data.active,
+        sort_order: data.sortOrder ?? 0,
       });
       throwIf(error);
     },
@@ -292,11 +322,13 @@ export function useCreateTemplate() {
 export function useUpdateTemplate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: { name: string; category: EventCategory; previewImage: string; active: boolean } }) => {
-      const { error } = await supabase.from("templates").update({
+    mutationFn: async ({ id, data }: { id: number; data: { name: string; category: EventCategory; previewImage: string; active: boolean; sortOrder?: number } }) => {
+      const patch: Record<string, unknown> = {
         name: data.name, category: data.category,
         preview_image: data.previewImage, active: data.active,
-      }).eq("id", id);
+      };
+      if (data.sortOrder !== undefined) patch.sort_order = data.sortOrder;
+      const { error } = await supabase.from("templates").update(patch).eq("id", id);
       throwIf(error);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["templates"] }),

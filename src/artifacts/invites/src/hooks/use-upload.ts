@@ -27,7 +27,11 @@ export function useUpload(options?: UseUploadOptions) {
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  const uploadFile = async (file: File | Blob, name: string) => {
+  const uploadFile = async (
+    file: File | Blob,
+    name: string,
+    opts?: { bucket?: string },
+  ) => {
     if (!user) throw new Error("يجب تسجيل الدخول أولاً");
     try {
       setIsUploading(true);
@@ -35,7 +39,9 @@ export function useUpload(options?: UseUploadOptions) {
 
       const contentType = file.type || "application/octet-stream";
       const isAudio = contentType.startsWith("audio/") || /\.(mp3|wav|ogg|webm|m4a)$/i.test(name);
-      const bucket = isAudio ? "event-audios" : "event-images";
+      // bucket صريح عند الحاجة (صور القوالب تذهب إلى template-images
+      // وسياسته تسمح للأدمن وحده بالكتابة)، وإلا نختار حسب نوع الملف.
+      const bucket = opts?.bucket ?? (isAudio ? "event-audios" : "event-images");
 
       // تحقق مبكر من الحجم والنوع قبل استهلاك شبكة المستخدم
       const rule = isAudio ? UPLOAD_LIMITS.audio : UPLOAD_LIMITS.image;
