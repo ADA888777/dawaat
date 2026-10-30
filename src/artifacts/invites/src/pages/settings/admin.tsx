@@ -39,12 +39,14 @@ import {
   useUpdateAppSettings,
   useUpdateMyProfile,
   useUpdateTemplate,
+  EVENT_CATEGORIES,
   type AdminUser,
   type AppSettings,
   type ContactMethod,
   type EventCategory,
   type Me,
 } from "@/lib/api";
+import { AnnouncementImageField } from "@/components/announcement-image-field";
 import {
   AccountSecurityCard,
   FieldRow,
@@ -71,14 +73,8 @@ const CONTACT_METHOD_OPTIONS = [
   { value: "call", label: "اتصال فقط" },
 ];
 
-const CATEGORY_OPTIONS = [
-  { value: "wedding", label: "زفاف" },
-  { value: "engagement", label: "خطوبة" },
-  { value: "birthday", label: "عيد ميلاد" },
-  { value: "graduation", label: "تخرج" },
-  { value: "meeting", label: "اجتماع" },
-  { value: "general", label: "عام" },
-];
+// مصدر الأسماء واحد في lib/api — إضافة تصنيف جديد لا تحتاج تعديلاً هنا
+const CATEGORY_OPTIONS = EVENT_CATEGORIES;
 
 const WEEK = 7 * 24 * 3600 * 1000;
 
@@ -139,7 +135,7 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
   const [drafts, setDrafts] = useState<Record<string, UserDraft>>({});
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [confirmTemplateId, setConfirmTemplateId] = useState<number | null>(null);
-  const [newTemplate, setNewTemplate] = useState({ name: "", category: "general", previewImage: "" });
+  const [newTemplate, setNewTemplate] = useState({ name: "", category: "general", previewImage: "", sortOrder: 0 });
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => { setName(me.name); }, [me.name]);
@@ -242,6 +238,10 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
       toast({ title: "اكتب اسماً للقالب", variant: "destructive" });
       return;
     }
+    if (!newTemplate.previewImage.trim()) {
+      toast({ title: "ارفع تصميم القالب أولاً", variant: "destructive" });
+      return;
+    }
     createTemplate.mutate(
       {
         data: {
@@ -249,11 +249,12 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
           category: newTemplate.category as EventCategory,
           previewImage: newTemplate.previewImage.trim(),
           active: true,
+          sortOrder: newTemplate.sortOrder,
         },
       },
       {
         onSuccess: () => {
-          setNewTemplate({ name: "", category: "general", previewImage: "" });
+          setNewTemplate({ name: "", category: "general", previewImage: "", sortOrder: 0 });
           toast({ title: "تم إضافة القالب" });
         },
         onError: (error: Error) =>
@@ -745,6 +746,7 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
                   <p className="font-medium text-gray-900 truncate">{template.name}</p>
                   <p className="text-xs text-gray-500">
                     {CATEGORY_OPTIONS.find((option) => option.value === template.category)?.label ?? template.category}
+                    {" · ترتيب "}{template.sortOrder ?? 0}
                   </p>
                 </div>
                 <Switch
@@ -797,13 +799,24 @@ export default function AdminSettings({ me, only, embedded = false }: AdminSetti
                 />
               </FieldRow>
             </div>
-            <FieldRow label="رابط صورة المعاينة" hint="رابط مباشر لصورة تُعرض للمستخدم قبل الاختيار.">
-              <Input
-                dir="ltr"
-                inputMode="url"
-                placeholder="https://"
+            <FieldRow label="تصميم القالب" hint="ارفع الصورة من جهازك أو جوالك، أو الصق رابطاً جاهزاً.">
+              <AnnouncementImageField
+                variant="template"
+                bucket="template-images"
+                testId="new-template-image"
                 value={newTemplate.previewImage}
-                onChange={(event) => setNewTemplate((prev) => ({ ...prev, previewImage: event.target.value }))}
+                onChange={(url) => setNewTemplate((prev) => ({ ...prev, previewImage: url }))}
+              />
+            </FieldRow>
+            <FieldRow label="ترتيب الظهور" hint="الأصغر يظهر أولاً للمستخدمين. اتركه ٠ ليأخذ ترتيبه الافتراضي.">
+              <Input
+                type="number"
+                min={0}
+                dir="ltr"
+                value={newTemplate.sortOrder}
+                onChange={(event) =>
+                  setNewTemplate((prev) => ({ ...prev, sortOrder: Number(event.target.value) || 0 }))
+                }
               />
             </FieldRow>
             <Button
