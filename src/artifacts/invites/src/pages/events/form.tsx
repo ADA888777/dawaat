@@ -4,13 +4,13 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Link, useLocation, useParams } from "wouter";
-import { useCreateEvent, useUpdateEvent, useGetEvent, useListTemplates, useGetMe, getGetEventQueryKey, normalizePhone, isValidPhone, useGetAppSettings } from "@/lib/api";
+import { useCreateEvent, useUpdateEvent, useGetEvent, useListTemplates, useGetMe, getGetEventQueryKey, normalizePhone, isValidPhone, useGetAppSettings, EVENT_CATEGORIES, categoryLabel, type EventCategory } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Mic, Square, UploadCloud, ChevronRight, Loader2, Play, Pause } from "lucide-react";
+import { Mic, Square, UploadCloud, ChevronRight, Loader2, Play, Pause, Search, X, Check } from "lucide-react";
 import { useUpload } from "@/hooks/use-upload";
 import { EventQuotaNotice, useEventQuota } from "@/components/event-quota-notice";
 import { useToast } from "@/hooks/use-toast";
@@ -32,7 +32,7 @@ function toLocalInputValue(value: string): string {
 
 const eventSchema = z.object({
   title: z.string().min(1, "عنوان المناسبة مطلوب"),
-  category: z.enum(['wedding', 'engagement', 'birthday', 'graduation', 'meeting', 'general']),
+  category: z.enum(['wedding', 'engagement', 'birthday', 'graduation', 'meeting', 'congratulation', 'condolence', 'promotion', 'general']),
   eventDate: z.string().min(1, "التاريخ والوقت مطلوب"),
   location: z.string().min(1, "موقع المناسبة مطلوب"),
   description: z.string().optional(),
@@ -60,6 +60,9 @@ export default function EventForm() {
   const eventId = isEditing ? Number(params.id) : null;
 
   const [step, setStep] = useState(1);
+  // معرض القوالب: بحث بالاسم، وفلترة بالمناسبة ("suggested" = المقترحة لنوع المناسبة)
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [templateFilter, setTemplateFilter] = useState<"suggested" | "all" | EventCategory>("suggested");
   const { data: templates } = useListTemplates();
   const { data: me } = useGetMe();
   const { data: eventData, isLoading: isLoadingEvent } = useGetEvent(eventId!, { query: { enabled: !!eventId, queryKey: getGetEventQueryKey(eventId!) } });
@@ -386,12 +389,9 @@ export default function EventForm() {
                             <SelectTrigger dir="rtl"><SelectValue placeholder="اختر النوع" /></SelectTrigger>
                           </FormControl>
                           <SelectContent dir="rtl">
-                            <SelectItem value="wedding">زفاف</SelectItem>
-                            <SelectItem value="engagement">خطوبة</SelectItem>
-                            <SelectItem value="graduation">تخرج</SelectItem>
-                            <SelectItem value="birthday">ميلاد</SelectItem>
-                            <SelectItem value="meeting">اجتماع</SelectItem>
-                            <SelectItem value="general">عام</SelectItem>
+                            {EVENT_CATEGORIES.map((item) => (
+                              <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -497,26 +497,110 @@ export default function EventForm() {
 
               {/* Step 2: Templates */}
               <div className={step === 2 ? "block" : "hidden"}>
-                <h2 className="text-xl font-bold mb-6 text-gray-900">اختر قالباً للدعوة</h2>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {templates?.filter(t => t.category === selectedCategory || t.category === 'general').map(template => (
-                    <div 
-                      key={template.id} 
-                      onClick={() => form.setValue("templateId", template.id)}
-                      className={`cursor-pointer rounded-xl overflow-hidden border-2 transition-all ${
-                        form.watch("templateId") === template.id ? "border-gold ring-2 ring-gold/20" : "border-transparent hover:border-gray-200"
-                      }`}
+                <h2 className="text-xl font-bold mb-1 text-gray-900">اختر قالباً للدعوة</h2>
+                <p className="text-sm text-gray-600 mb-4">ابحث بالاسم أو صفِّ حسب المناسبة، ثم اضغط القالب لاختياره.</p>
+
+                <div className="relative mb-3">
+                  <Search className="pointer-events-none absolute top-1/2 right-3 w-4 h-4 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    value={templateSearch}
+                    onChange={(e) => setTemplateSearch(e.target.value)}
+                    placeholder="ابحث عن قالب بالاسم…"
+                    aria-label="البحث في القوالب"
+                    className="pr-9 pl-9"
+                  />
+                  {templateSearch !== "" && (
+                    <button
+                      type="button"
+                      aria-label="مسح البحث"
+                      onClick={() => setTemplateSearch("")}
+                      className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
-                      <img src={template.previewImage} alt={template.name} className="w-full aspect-[3/4] object-cover bg-gray-100" />
-                      <div className="p-3 bg-gray-50 text-center font-medium text-sm text-gray-900 border-t border-gray-100">
-                        {template.name}
-                      </div>
-                    </div>
-                  ))}
-                  {templates?.filter(t => t.category === selectedCategory || t.category === 'general').length === 0 && (
-                    <div className="col-span-full py-10 text-center text-gray-600">لا توجد قوالب متاحة لهذا النوع حالياً</div>
+                      <X className="w-4 h-4" />
+                    </button>
                   )}
                 </div>
+
+                <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-2">
+                  {[{ value: "suggested", label: "المقترحة" }, { value: "all", label: "الكل" }, ...EVENT_CATEGORIES].map((chip) => (
+                    <button
+                      key={chip.value}
+                      type="button"
+                      onClick={() => setTemplateFilter(chip.value as "suggested" | "all" | EventCategory)}
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                        templateFilter === chip.value
+                          ? "border-gold bg-gold/10 text-gold-deep"
+                          : "border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
+
+                {(() => {
+                  const term = templateSearch.trim().toLowerCase();
+                  const visible = (templates ?? []).filter((t) => {
+                    const byCategory =
+                      templateFilter === "all"
+                        ? true
+                        : templateFilter === "suggested"
+                          ? t.category === selectedCategory || t.category === "general"
+                          : t.category === templateFilter;
+                    const byName = term === "" || t.name.toLowerCase().includes(term);
+                    return byCategory && byName;
+                  });
+
+                  if (visible.length === 0) {
+                    return (
+                      <div className="py-12 text-center text-gray-600">
+                        لا توجد قوالب مطابقة.
+                        <button
+                          type="button"
+                          onClick={() => { setTemplateSearch(""); setTemplateFilter("all"); }}
+                          className="mx-auto mt-2 block text-sm text-gold-deep underline"
+                        >
+                          اعرض كل القوالب
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+                      {visible.map((template) => {
+                        const selected = form.watch("templateId") === template.id;
+                        return (
+                          <button
+                            key={template.id}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => form.setValue("templateId", template.id)}
+                            className={`relative overflow-hidden rounded-xl border-2 text-right transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
+                              selected ? "border-gold ring-2 ring-gold/20" : "border-transparent hover:border-gray-200"
+                            }`}
+                          >
+                            <img
+                              src={template.previewImage}
+                              alt={template.name}
+                              loading="lazy"
+                              className="aspect-[3/4] w-full bg-gray-100 object-cover"
+                            />
+                            {selected && (
+                              <span className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-gold text-white shadow">
+                                <Check className="h-3.5 w-3.5" />
+                              </span>
+                            )}
+                            <div className="border-t border-gray-100 bg-gray-50 p-2 sm:p-3">
+                              <p className="truncate text-xs font-medium text-gray-900 sm:text-sm">{template.name}</p>
+                              <p className="text-[10px] text-gray-500 sm:text-[11px]">{categoryLabel(template.category)}</p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
                 <div className="mt-8 flex justify-between">
                   <Button type="button" variant="outline" onClick={() => setStep(1)}>السابق</Button>
                   <Button type="button" onClick={() => setStep(3)} className="bg-ink hover:bg-ink-soft text-gold px-8">
