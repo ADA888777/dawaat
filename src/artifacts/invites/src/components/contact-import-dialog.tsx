@@ -643,6 +643,25 @@ export function ContactImportDialog({
           )}
 
           {useShortcut ? (
+            <>
+            {/* بديل ظاهر على الآيفون: رفع ملف جهات الاتصال من الجوال مباشرة،
+               لأن اختصار Apple قد لا يكون مهيأً فيعلق المستخدم بلا مخرج. */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              {optionCard(
+                "vcf",
+                <Contact className="h-6 w-6" />,
+                "استيراد ملف VCF",
+                "ملف جهات الاتصال من جوالك",
+                () => chooseFileMethod("vcf"),
+              )}
+              {optionCard(
+                "csv",
+                <FileSpreadsheet className="h-6 w-6" />,
+                "استيراد CSV",
+                "من Excel أو Google",
+                () => chooseFileMethod("csv"),
+              )}
+            </div>
             <button
               type="button"
               onClick={() => {
@@ -654,6 +673,7 @@ export function ContactImportDialog({
             >
               <UserPlus className="h-3.5 w-3.5" /> أو أضف الاسم والرقم يدوياً
             </button>
+            </>
           ) : compactMobile && !showMore ? (
             <button
               type="button"
