@@ -196,6 +196,37 @@ export default function EventDetail() {
     [guests, selectedSet],
   );
 
+  /**
+   * تصدير قائمة المدعوين كملف CSV.
+   * BOM في أول الملف ضروري: بدونه يفتح Excel الأسماء العربية طلاسم.
+   */
+  const downloadGuestsCsv = () => {
+    if (!event) return;
+    const rows = filteredGuests.length > 0 ? filteredGuests : guests ?? [];
+    if (rows.length === 0) return;
+    const esc = (value: string) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
+    const lines = [["الاسم", "رقم الجوال", "الحالة", "تاريخ الإرسال"].map(esc).join(",")];
+    for (const g of rows) {
+      lines.push(
+        [
+          esc(g.name),
+          esc(toWesternDigits(g.phone)),
+          esc(GUEST_STATUS_LABELS[getGuestDisplayStatus(g, event.eventDate)]),
+          esc(g.inviteSentAt ? new Date(g.inviteSentAt).toLocaleString("ar-SA") : ""),
+        ].join(","),
+      );
+    }
+    const blob = new Blob(["\uFEFF" + lines.join("\r\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = (event.title || "المدعوون").replace(/[\\/:*?"<>|]/g, "-") + ".csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const toggleSelectAll = () => {
     if (allVisibleSelected) {
       setSelectedIds((prev) => prev.filter((gid) => !visibleIds.includes(gid)));
@@ -711,6 +742,16 @@ export default function EventDetail() {
               >
                 <CheckSquare className="ml-2 h-4 w-4" />
                 {allVisibleSelected ? "إلغاء تحديد الكل" : "تحديد الكل"}
+              </Button>
+              <Button
+                variant="outline"
+                className="border-gray-200"
+                onClick={downloadGuestsCsv}
+                disabled={(guests ?? []).length === 0}
+                title="تنزيل القائمة ملف CSV يفتح في Excel بعربي سليم"
+              >
+                <Download className="ml-2 h-4 w-4" />
+                تصدير
               </Button>
               {featSend && (
               <Button
